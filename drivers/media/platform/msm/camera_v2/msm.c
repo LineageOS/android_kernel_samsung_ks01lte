@@ -444,16 +444,18 @@ void msm_delete_command_ack_q(unsigned int session_id, unsigned int stream_id)
 	session = msm_queue_find(msm_session_q, struct msm_session,
 		list, __msm_queue_find_session, &session_id);
 	if (!session) {
-	    pr_err("%s : session is NULL!!", __func__);
-	    return;
+		pr_err("%s : session is NULL!!", __func__);
+		return;
 	}
+	mutex_lock(&session->lock);
 
 	cmd_ack = msm_queue_find(&session->command_ack_q,
 		struct msm_command_ack,	list, __msm_queue_find_command_ack_q,
 		&stream_id);
 	if (!cmd_ack) {
-	    pr_err("%s : cmd_ack is NULL!", __func__);
-	    return;
+		pr_err("%s : cmd_ack is NULL!", __func__);
+		mutex_unlock(&session->lock);
+		return;
 	}
 
 	msm_queue_drain(&cmd_ack->command_q, struct msm_command, list);
@@ -463,6 +465,7 @@ void msm_delete_command_ack_q(unsigned int session_id, unsigned int stream_id)
 	kzfree(cmd_ack);
 	session->command_ack_q.len--;
 	spin_unlock_irqrestore(&(session->command_ack_q.lock), flags);
+	mutex_unlock(&session->lock);
 }
 
 static inline int __msm_sd_close_subdevs(struct msm_sd_subdev *msm_sd,
@@ -515,6 +518,7 @@ static void msm_remove_session_cmd_ack_q(struct msm_session *session)
 	if ((!session) || !(&session->command_ack_q))
 		return;
 
+	mutex_lock(&session->lock);
 	/* to ensure error handling purpose, it needs to detach all subdevs
 	 * which are being connected to streams */
 	msm_queue_traverse_action(&session->command_ack_q,
@@ -522,6 +526,8 @@ static void msm_remove_session_cmd_ack_q(struct msm_session *session)
 		__msm_remove_session_cmd_ack_q, NULL);
 
 	msm_queue_drain(&session->command_ack_q, struct msm_command_ack, list);
+
+	mutex_unlock(&session->lock);
 }
 
 int msm_destroy_session(unsigned int session_id)
