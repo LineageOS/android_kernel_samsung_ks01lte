@@ -82,9 +82,9 @@ Optional properties :
 - qcom,hsusb-l1-supported: If present, the device supports l1 (Link power
 	management).
 - qcom,no-selective-suspend: If present selective suspend is disabled on hub ports.
-- qcom,hsusb-otg-mpm-dpsehv-int: If present, indicates mpm interrupt to be configured
+- qcom,hsusb-otg-dpsehv-int: If present, indicates mpm interrupt to be configured
 	for detection of dp line transition during VDD minimization.
-- qcom,hsusb-otg-mpm-dmsehv-int: If present, indicates mpm interrupt to be configured
+- qcom,hsusb-otg-dmsehv-int: If present, indicates mpm interrupt to be configured
 	for detection of dm line transition during VDD minimization.
 - qcom,ahb-async-bridge-bypass: If present, indicates that enable AHB2AHB By Pass
 	mode with device controller for better throughput. With this mode, USB Core
@@ -93,8 +93,6 @@ Optional properties :
 	enable this feature without proper bus voting.
 -qcom,disable-retention-with-vdd-min: If present dont allow phy retention but allow
 	vdd min.
-- qcom,usbin-vadc: Corresponding vadc device's phandle to read usbin voltage using VADC.
-	This will be used to get value of usb power supply's VOLTAGE_NOW property.
 
 Example HSUSB OTG controller device node :
 	usb@f9690000 {
@@ -122,7 +120,6 @@ Example HSUSB OTG controller device node :
 		qcom,disable-retention-with-vdd-min;
 		qcom,hsusb-otg-dpsehv-int = <49>;
 		qcom,hsusb-otg-dmsehv-int = <58>;
-		qcom,usbin-vadc = <&pm8226_vadc>;
 		qcom,msm_bus,name = "usb2";
 		qcom,msm_bus,num_cases = <2>;
 		qcom,msm_bus,active_only = <0>;

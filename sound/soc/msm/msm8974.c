@@ -10,8 +10,6 @@
  * GNU General Public License for more details.
  */
 
-//#define DEBUG
-
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/gpio.h>
@@ -64,7 +62,7 @@ static int msm8974_auxpcm_rate = 8000;
 #define I2S_PCM_SEL 1
 #define I2S_PCM_SEL_OFFSET 1
 
-#define WCD9XXX_MBHC_DEF_BUTTONS 8
+#define WCD9XXX_MBHC_DEF_BUTTONS 3
 #define WCD9XXX_MBHC_DEF_RLOADS 5
 #define TAIKO_EXT_CLK_RATE 9600000
 
@@ -125,11 +123,7 @@ static struct wcd9xxx_mbhc_config mbhc_cfg = {
 	.mclk_rate = TAIKO_EXT_CLK_RATE,
 	.gpio = 0,
 	.gpio_irq = 0,
-#ifndef CONFIG_MACH_OPPO //luyan modify 2013-4-18
-	.gpio_level_insert = 1,
-#else
 	.gpio_level_insert = 0,
-#endif
 	.detect_extn_cable = true,
 	.micbias_enable_flags = 1 << MBHC_MICBIAS_ENABLE_THRESHOLD_HEADSET,
 	.insert_detect = true,
@@ -138,10 +132,10 @@ static struct wcd9xxx_mbhc_config mbhc_cfg = {
 	.cs_enable_flags = (1 << MBHC_CS_ENABLE_POLLING |
 			    1 << MBHC_CS_ENABLE_INSERTION |
 			    1 << MBHC_CS_ENABLE_REMOVAL),
-	.do_recalibration = true,
+	.do_recalibration = false,
 	.use_vddio_meas = true,
 	.enable_anc_mic_detect = false,
-	.hw_jack_type = FOUR_POLE_JACK,
+	.hw_jack_type = SIX_POLE_JACK,
 };
 
 struct msm_auxpcm_gpio {
@@ -223,15 +217,6 @@ static int clk_users;
 static atomic_t prim_auxpcm_rsc_ref;
 static atomic_t sec_auxpcm_rsc_ref;
 
-#ifdef CONFIG_MACH_OPPO
-static int msm8974_oppo_ext_spk;
-static int oppo_enable_spk_gpio = -1;
-static int yda145_ctr_gpio = -1;
-#ifdef CONFIG_MACH_FIND7
-static int yda145_boost_gpio = -1;
-#endif
-#endif
-
 static int msm8974_liquid_ext_spk_power_amp_init(void)
 {
 	int ret = 0;
@@ -278,56 +263,6 @@ static int msm8974_liquid_ext_spk_power_amp_init(void)
 	return 0;
 }
 
-#ifdef CONFIG_MACH_OPPO
-static int oppo_ext_spk_power_init(void)
-{
-	int ret = 0;
-
-	oppo_enable_spk_gpio = of_get_named_gpio(spdev->dev.of_node,
-			"enable_spk-gpio", 0);
-	if (oppo_enable_spk_gpio >= 0) {
-		ret = gpio_request(oppo_enable_spk_gpio, "enable_spk_gpio");
-		if (ret) {
-			pr_err("%s: gpio_request failed for enable_spk-gpio.\n",
-				__func__);
-			return -EINVAL;
-		}
-		gpio_direction_output(oppo_enable_spk_gpio, 0);
-	}
-
-	yda145_ctr_gpio = of_get_named_gpio(spdev->dev.of_node,
-			"qcom,yda145_ctr-gpio", 0);
-	if (yda145_ctr_gpio >= 0) {
-		ret = gpio_request(yda145_ctr_gpio, "yda145_ctr_gpio");
-		if (ret) {
-			gpio_free(oppo_enable_spk_gpio);
-			pr_err("%s: gpio_request failed for yda145_ctr-gpio.\n",
-				__func__);
-			return -EINVAL;
-		}
-		gpio_direction_output(yda145_ctr_gpio, 0);
-	}
-
-#ifdef CONFIG_MACH_FIND7
-	yda145_boost_gpio = of_get_named_gpio(spdev->dev.of_node,
-			"qcom,yda145_boost-gpio", 0);
-	if (yda145_boost_gpio >= 0) {
-		ret = gpio_request(yda145_boost_gpio, "yda145_boost_gpio");
-		if (ret) {
-			gpio_free(yda145_ctr_gpio);
-			gpio_free(oppo_enable_spk_gpio);
-			pr_err("%s: gpio_request failed for yda145_boost-gpio.\n",
-				__func__);
-			return -EINVAL;
-		}
-		gpio_direction_output(yda145_boost_gpio, 0);
-	}
-#endif
-
-	return 0;
-}
-#endif
-
 static void msm8974_liquid_ext_ult_spk_power_amp_enable(u32 on)
 {
 	if (on) {
@@ -371,29 +306,6 @@ static void msm8974_liquid_ext_spk_power_amp_enable(u32 on)
 	pr_debug("%s: %s external speaker PAs.\n", __func__,
 			on ? "Enable" : "Disable");
 }
-
-#ifdef CONFIG_MACH_OPPO
-static void msm8974_oppo_ext_spk_power_amp_enable(bool enable)
-{
-	if (enable) {
-		gpio_set_value(oppo_enable_spk_gpio, 1);
-
-		gpio_set_value(yda145_ctr_gpio, 1);
-#ifdef CONFIG_MACH_FIND7
-		usleep_range(15000, 25000);
-		gpio_set_value(yda145_boost_gpio, 1);
-#endif
-	} else {
-#ifdef CONFIG_MACH_FIND7
-		gpio_set_value(yda145_boost_gpio, 0);
-		usleep_range(15000, 25000);
-#endif
-		gpio_set_value(yda145_ctr_gpio, 0);
-
-		gpio_set_value(oppo_enable_spk_gpio, 0);
-	}
-}
-#endif
 
 static void msm8974_liquid_docking_irq_work(struct work_struct *work)
 {
@@ -556,32 +468,12 @@ static void msm8974_fluid_ext_us_amp_off(u32 spk)
 	}
 }
 
-#ifdef CONFIG_MACH_OPPO
-static void msm8974_oppo_ext_spk_power_amp_on(u32 spk)
-{
-	if (spk & (LO_1_SPK_AMP | LO_3_SPK_AMP)) {
-		pr_debug("%s Turn on amp, spk=%d", __func__, spk);
-		if (!msm8974_oppo_ext_spk)
-			msm8974_oppo_ext_spk_power_amp_enable(true);
-		msm8974_oppo_ext_spk |= spk;
-	}
-}
-#endif
-
 static void msm8974_ext_spk_power_amp_on(u32 spk)
 {
 	if (gpio_is_valid(ext_spk_amp_gpio))
 		msm8974_liquid_ext_spk_power_amp_on(spk);
 	else if (gpio_is_valid(ext_ult_lo_amp_gpio))
 		msm8974_fluid_ext_us_amp_on(spk);
-#ifdef CONFIG_MACH_OPPO
-	else if (gpio_is_valid(oppo_enable_spk_gpio) &&
-#ifdef CONFIG_MACH_FIND7
-			gpio_is_valid(yda145_boost_gpio) &&
-#endif
-			gpio_is_valid(yda145_ctr_gpio))
-		msm8974_oppo_ext_spk_power_amp_on(spk);
-#endif
 }
 
 static void msm8974_liquid_ext_spk_power_amp_off(u32 spk)
@@ -610,32 +502,12 @@ static void msm8974_liquid_ext_spk_power_amp_off(u32 spk)
 	}
 }
 
-#ifdef CONFIG_MACH_OPPO
-static void msm8974_oppo_ext_spk_power_amp_off(u32 spk)
-{
-	if (spk & (LO_1_SPK_AMP | LO_3_SPK_AMP)) {
-		pr_debug("%s: Turn off amp, spk=%d", __func__, spk);
-		msm8974_oppo_ext_spk &= ~spk;
-		if (!msm8974_oppo_ext_spk)
-			msm8974_oppo_ext_spk_power_amp_enable(false);
-	}
-}
-#endif
-
 static void msm8974_ext_spk_power_amp_off(u32 spk)
 {
 	if (gpio_is_valid(ext_spk_amp_gpio))
 		msm8974_liquid_ext_spk_power_amp_off(spk);
 	else if (gpio_is_valid(ext_ult_lo_amp_gpio))
 		msm8974_fluid_ext_us_amp_off(spk);
-#ifdef CONFIG_MACH_OPPO
-	else if (gpio_is_valid(oppo_enable_spk_gpio) &&
-#ifdef CONFIG_MACH_FIND7
-			gpio_is_valid(yda145_boost_gpio) &&
-#endif
-			gpio_is_valid(yda145_ctr_gpio))
-		msm8974_oppo_ext_spk_power_amp_off(spk);
-#endif
 }
 
 static void msm8974_ext_control(struct snd_soc_codec *codec)
@@ -824,20 +696,10 @@ static const struct snd_soc_dapm_widget msm8974_dapm_widgets[] = {
 	SND_SOC_DAPM_SPK("SPK_ultrasound amp",
 					 msm_ext_spkramp_ultrasound_event),
 
-	SND_SOC_DAPM_MIC("Handset Mic", NULL),
-	SND_SOC_DAPM_MIC("Headset Mic", NULL),
-
-#ifndef CONFIG_MACH_OPPO
-	SND_SOC_DAPM_MIC("ANCRight Headset Mic", NULL),
-	SND_SOC_DAPM_MIC("ANCLeft Headset Mic", NULL),
-#else
 	SND_SOC_DAPM_MIC("Main Mic", NULL),
-	SND_SOC_DAPM_MIC("Second Mic", NULL),
-	SND_SOC_DAPM_MIC("ANC Mic", NULL),
-#endif
-	SND_SOC_DAPM_MIC("Analog Mic4", NULL),
-	SND_SOC_DAPM_MIC("Analog Mic6", NULL),
-	SND_SOC_DAPM_MIC("Analog Mic7", NULL),
+	SND_SOC_DAPM_MIC("Headset Mic", NULL),
+	SND_SOC_DAPM_MIC("Sub Mic", NULL),
+	SND_SOC_DAPM_MIC("Third Mic", NULL),
 
 	SND_SOC_DAPM_MIC("Digital Mic1", NULL),
 	SND_SOC_DAPM_MIC("Digital Mic2", NULL),
@@ -1004,10 +866,10 @@ static int msm_btsco_rate_put(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
 	switch (ucontrol->value.integer.value[0]) {
-	case 0:
+	case 8000:
 		msm_btsco_rate = BTSCO_RATE_8KHZ;
 		break;
-	case 1:
+	case 16000:
 		msm_btsco_rate = BTSCO_RATE_16KHZ;
 		break;
 	default:
@@ -1710,15 +1572,6 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 		return err;
 	}
 
-#ifdef CONFIG_MACH_OPPO
-	err = oppo_ext_spk_power_init();
-	if (err) {
-		pr_err("%s: Oppo external speaker power init failed (%d)\n",
-			__func__, err);
-		return err;
-	}
-#endif
-
 	err = msm8974_liquid_init_docking(dapm);
 	if (err) {
 		pr_err("%s: LiQUID 8974 init Docking stat IRQ failed (%d)\n",
@@ -1841,8 +1694,8 @@ void *def_taiko_mbhc_cal(void)
 	S(t_ins_retry, 200);
 #undef S
 #define S(X, Y) ((WCD9XXX_MBHC_CAL_PLUG_TYPE_PTR(taiko_cal)->X) = (Y))
-	S(v_no_mic, 30);
-	S(v_hs_max, 2400);
+	S(v_no_mic, 950);
+	S(v_hs_max, 3000);
 #undef S
 #define S(X, Y) ((WCD9XXX_MBHC_CAL_BTN_DET_PTR(taiko_cal)->X) = (Y))
 	S(c[0], 62);
@@ -1853,43 +1706,19 @@ void *def_taiko_mbhc_cal(void)
 	S(n_btn_meas, 1);
 	S(n_btn_con, 2);
 	S(num_btn, WCD9XXX_MBHC_DEF_BUTTONS);
-#ifdef CONFIG_MACH_OPPO
-	S(v_btn_press_delta_sta, 0);
-#else
 	S(v_btn_press_delta_sta, 100);
-#endif
 	S(v_btn_press_delta_cic, 50);
 #undef S
 	btn_cfg = WCD9XXX_MBHC_CAL_BTN_DET_PTR(taiko_cal);
 	btn_low = wcd9xxx_mbhc_cal_btn_det_mp(btn_cfg, MBHC_BTN_DET_V_BTN_LOW);
 	btn_high = wcd9xxx_mbhc_cal_btn_det_mp(btn_cfg,
 					       MBHC_BTN_DET_V_BTN_HIGH);
-#ifdef CONFIG_MACH_OPPO
-	btn_low[0] = -70;
-	btn_high[0] = 50;
-	btn_low[1] = 51;
-#else
 	btn_low[0] = -50;
-	btn_high[0] = 20;
-	btn_low[1] = 21;
-#endif
-	btn_high[1] = 61;
-	btn_low[2] = 62;
-	btn_high[2] = 104;
-	btn_low[3] = 105;
-	btn_high[3] = 148;
-	btn_low[4] = 149;
-	btn_high[4] = 189;
-	btn_low[5] = 190;
-	btn_high[5] = 228;
-	btn_low[6] = 229;
-	btn_high[6] = 274;
-	btn_low[7] = 275;
-#ifdef CONFIG_MACH_OPPO
-	btn_high[7] = 800;
-#else
-	btn_high[7] = 500;
-#endif
+	btn_high[0] = 160;
+	btn_low[1] = 161;
+	btn_high[1] = 330;
+	btn_low[2] = 331;
+	btn_high[2] = 730;
 	n_ready = wcd9xxx_mbhc_cal_btn_det_mp(btn_cfg, MBHC_BTN_DET_N_READY);
 	n_ready[0] = 80;
 	n_ready[1] = 68;
@@ -1941,8 +1770,14 @@ static int msm_snd_hw_params(struct snd_pcm_substream *substream,
 			goto end;
 		}
 		/* For tabla_tx1 case */
+#if defined(CONFIG_SND_SOC_ES325)
+		if ((codec_dai->id == 1) ||(codec_dai->id == 11)) {
+			user_set_tx_ch = msm_slim_0_tx_ch;
+		}
+#else
 		if (codec_dai->id == 1)
 			user_set_tx_ch = msm_slim_0_tx_ch;
+#endif
 		/* For tabla_tx2 case */
 		else if (codec_dai->id == 3)
 			user_set_tx_ch = params_channels(params);
@@ -3344,19 +3179,6 @@ static int __devexit msm8974_asoc_machine_remove(struct platform_device *pdev)
 
 	if (gpio_is_valid(ext_ult_lo_amp_gpio))
 		gpio_free(ext_ult_lo_amp_gpio);
-
-#ifdef CONFIG_MACH_OPPO
-	if (gpio_is_valid(oppo_enable_spk_gpio))
-		gpio_free(oppo_enable_spk_gpio);
-
-	if (gpio_is_valid(yda145_ctr_gpio))
-		gpio_free(yda145_ctr_gpio);
-
-#ifdef CONFIG_MACH_FIND7
-	if (gpio_is_valid(yda145_boost_gpio))
-		gpio_free(yda145_boost_gpio);
-#endif
-#endif
 
 	gpio_free(pdata->mclk_gpio);
 	gpio_free(pdata->us_euro_gpio);

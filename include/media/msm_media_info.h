@@ -6,76 +6,7 @@
 #endif
 
 enum color_fmts {
-	/* Venus NV12:
-	 * YUV 4:2:0 image with a plane of 8 bit Y samples followed
-	 * by an interleaved U/V plane containing 8 bit 2x2 subsampled
-	 * colour difference samples.
-	 *
-	 * <-------- Y/UV_Stride -------->
-	 * <------- Width ------->
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  ^           ^
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  |           |
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  Height      |
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  |          Y_Scanlines
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  |           |
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  |           |
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  |           |
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  V           |
-	 * X X X X X X X X X X X X X X X X              |
-	 * X X X X X X X X X X X X X X X X              |
-	 * X X X X X X X X X X X X X X X X              |
-	 * X X X X X X X X X X X X X X X X              V
-	 * U V U V U V U V U V U V X X X X  ^
-	 * U V U V U V U V U V U V X X X X  |
-	 * U V U V U V U V U V U V X X X X  |
-	 * U V U V U V U V U V U V X X X X  UV_Scanlines
-	 * X X X X X X X X X X X X X X X X  |
-	 * X X X X X X X X X X X X X X X X  V
-	 * X X X X X X X X X X X X X X X X  --> Buffer size alignment
-	 *
-	 * Y_Stride : Width aligned to 128
-	 * UV_Stride : Width aligned to 128
-	 * Y_Scanlines: Height aligned to 32
-	 * UV_Scanlines: Height/2 aligned to 16
-	 * Total size = align((Y_Stride * Y_Scanlines
-	 *          + UV_Stride * UV_Scanlines + 4096), 4096)
-	 */
 	COLOR_FMT_NV12,
-
-	/* Venus NV21:
-	 * YUV 4:2:0 image with a plane of 8 bit Y samples followed
-	 * by an interleaved V/U plane containing 8 bit 2x2 subsampled
-	 * colour difference samples.
-	 *
-	 * <-------- Y/UV_Stride -------->
-	 * <------- Width ------->
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  ^           ^
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  |           |
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  Height      |
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  |          Y_Scanlines
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  |           |
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  |           |
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  |           |
-	 * Y Y Y Y Y Y Y Y Y Y Y Y X X X X  V           |
-	 * X X X X X X X X X X X X X X X X              |
-	 * X X X X X X X X X X X X X X X X              |
-	 * X X X X X X X X X X X X X X X X              |
-	 * X X X X X X X X X X X X X X X X              V
-	 * V U V U V U V U V U V U X X X X  ^
-	 * V U V U V U V U V U V U X X X X  |
-	 * V U V U V U V U V U V U X X X X  |
-	 * V U V U V U V U V U V U X X X X  UV_Scanlines
-	 * X X X X X X X X X X X X X X X X  |
-	 * X X X X X X X X X X X X X X X X  V
-	 * X X X X X X X X X X X X X X X X  --> Padding & Buffer size alignment
-	 *
-	 * Y_Stride : Width aligned to 128
-	 * UV_Stride : Width aligned to 128
-	 * Y_Scanlines: Height aligned to 32
-	 * UV_Scanlines: Height/2 aligned to 16
-	 * Total size = align((Y_Stride * Y_Scanlines
-	 *          + UV_Stride * UV_Scanlines + 4096), 4096)
-	 */
 	COLOR_FMT_NV21,
 };
 
@@ -88,12 +19,7 @@ static inline unsigned int VENUS_EXTRADATA_SIZE(int width, int height)
 	 * In the future, calculate the size based on the w/h but just
 	 * hardcode it for now since 8K satisfies all current usecases.
 	 */
-#if 0
 	return 8 * 1024;
-#else
-	// BREAK ALL THE tHINGS
-	return 0;
-#endif
 }
 
 static inline unsigned int VENUS_Y_STRIDE(int color_fmt, int width)

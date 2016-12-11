@@ -33,8 +33,8 @@
 
 #include "boot_stats.h"
 
-#ifdef CONFIG_MACH_OPPO
-#include <linux/pcb_version.h>
+#ifdef CONFIG_SEC_PM
+#include <linux/io.h>
 #endif
 
 #define BUILD_ID_LENGTH 32
@@ -568,6 +568,58 @@ static uint32_t socinfo_get_format(void)
 	return socinfo ? socinfo->v1.format : 0;
 }
 
+#ifdef CONFIG_SEC_PM
+#define QFPROM_RAW_PTE_ROW1_LSB 0xFC4B80B0
+
+static uint32_t socinfo_get_pvs(void)
+{
+	u32 pte_efuse, redundant_sel, pvs_valid;
+	uint32_t pvs_bin;
+	void __iomem *pte_efuse_base;
+
+	pte_efuse_base = ioremap(QFPROM_RAW_PTE_ROW1_LSB, 8);
+
+	pte_efuse = readl_relaxed(pte_efuse_base);
+	redundant_sel = (pte_efuse >> 24) & 0x7;
+	pvs_bin = ((pte_efuse >> 28) & 0x8) | ((pte_efuse >> 6) & 0x7);
+
+	switch (redundant_sel) {
+	case 2:
+		pvs_bin = (pte_efuse >> 27) & 0xF;
+		break;
+	}
+
+	/* Check PVS_BLOW_STATUS */
+	pte_efuse = readl_relaxed(pte_efuse_base + 0x4);
+	iounmap(pte_efuse_base);
+
+	pvs_valid = !!(pte_efuse & BIT(21));
+
+	if (!pvs_valid) {
+		pr_err("%s: PVS bin is invalid %d\n", __func__, pvs_bin);
+		pvs_bin = 0;
+	}
+
+	return pvs_bin;
+}
+
+static uint32_t socinfo_get_iddq(void)
+{
+	uint32_t pte_efuse, qfprom_iddq_val;
+	void __iomem *pte_efuse_base;
+
+	pte_efuse_base = ioremap(QFPROM_RAW_PTE_ROW1_LSB, 8);
+
+	pte_efuse = readl_relaxed(pte_efuse_base);
+	iounmap(pte_efuse_base);
+
+	qfprom_iddq_val = pte_efuse & 0x7F800;
+	qfprom_iddq_val = qfprom_iddq_val >> 11;
+
+	return qfprom_iddq_val;
+}
+#endif
+
 enum msm_cpu socinfo_get_msm_cpu(void)
 {
 	return cur_cpu;
@@ -617,6 +669,34 @@ socinfo_show_build_id(struct sys_device *dev,
 
 	return snprintf(buf, PAGE_SIZE, "%-.32s\n", socinfo_get_build_id());
 }
+
+#ifdef CONFIG_SEC_PM
+static ssize_t
+socinfo_show_soc_iddq(struct sys_device *dev,
+		      struct sysdev_attribute *attr,
+		      char *buf)
+{
+	if (!socinfo) {
+		pr_err("%s: No socinfo found!\n", __func__);
+		return 0;
+	}
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", socinfo_get_iddq());
+}
+
+static ssize_t
+socinfo_show_soc_pvs(struct sys_device *dev,
+		      struct sysdev_attribute *attr,
+		      char *buf)
+{
+	if (!socinfo) {
+		pr_err("%s: No socinfo found!\n", __func__);
+		return 0;
+	}
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", socinfo_get_pvs());
+}
+#endif
 
 static ssize_t
 socinfo_show_raw_id(struct sys_device *dev,
@@ -750,131 +830,6 @@ socinfo_show_platform_subtype(struct sys_device *dev,
 	return snprintf(buf, PAGE_SIZE, "%-.32s\n",
 		hw_platform_subtype[hw_subtype]);
 }
-
-#ifdef CONFIG_MACH_OPPO
-static ssize_t
-socinfo_show_hw_pcb_version(struct sys_device *dev,
-			struct sysdev_attribute *attr,
-			char *buf)
-{
-	char *hw_version = "NULL";
-
-	if (!socinfo) {
-		pr_err("%s: No socinfo found!\n", __func__);
-		return 0;
-	}
-
-	switch (get_pcb_version()) {
-		case HW_VERSION__10:
-			hw_version = "10";
-			break;
-		case HW_VERSION__11:
-			hw_version = "11";
-			break;
-		case HW_VERSION__12:
-			hw_version = "12";
-			break;
-		case HW_VERSION__13:
-			hw_version = "13";
-			break;
-		case HW_VERSION__20:
-			hw_version = "20";
-			break;
-		case HW_VERSION__21:
-			hw_version = "21";
-			break;
-		case HW_VERSION__22:
-			hw_version = "22";
-			break;
-		case HW_VERSION__23:
-			hw_version = "23";
-			break;
-		default:
-			hw_version = "UNKNOWN";
-	}
-
-	return snprintf(buf, PAGE_SIZE, "%-.32s\n",
-			hw_version);
-}
-
-static ssize_t
-socinfo_show_hw_rf_version(struct sys_device *dev,
-			struct sysdev_attribute *attr,
-			char *buf)
-{
-	char *rf_version = "NULL";
-
-	if (!socinfo) {
-		pr_err("%s: No socinfo found!\n", __func__);
-		return 0;
-	}
-
-	switch (get_rf_version()) {
-		case RF_VERSION__11:
-			rf_version = "11";
-			break;
-		case RF_VERSION__12:
-			rf_version = "12";
-			break;
-		case RF_VERSION__13:
-			rf_version = "13";
-			break;
-		case RF_VERSION__21:
-			rf_version = "21";
-			break;
-		case RF_VERSION__22:
-			rf_version = "22";
-			break;
-		case RF_VERSION__23:
-			rf_version = "23";
-			break;
-		case RF_VERSION__31:
-			rf_version = "31";
-			break;
-		case RF_VERSION__32:
-			rf_version = "32";
-			break;
-		case RF_VERSION__33:
-			rf_version = "33";
-			break;
-		case RF_VERSION__44:
-			rf_version = "44";
-			break;
-		case RF_VERSION__66:
-			rf_version = "66";
-			break;
-		case RF_VERSION__67:
-			rf_version = "67";
-			break;
-		case RF_VERSION__76:
-			rf_version = "76";
-			break;
-		case RF_VERSION__77:
-			rf_version = "77";
-			break;
-		case RF_VERSION__87:
-			rf_version = "87";
-			break;
-		case RF_VERSION__88:
-			rf_version = "88";
-			break;
-		case RF_VERSION__89:
-			rf_version = "89";
-			break;
-		case RF_VERSION__98:
-			rf_version = "98";
-			break;
-		case RF_VERSION__99:
-			rf_version = "99";
-			break;
-		default:
-			rf_version = "UNKNOWN";
-	}
-
-	return snprintf(buf, PAGE_SIZE, "%-.32s\n",
-			rf_version);
-}
-#endif
 
 static ssize_t
 socinfo_show_platform_subtype_id(struct sys_device *dev,
@@ -1152,6 +1107,10 @@ static struct sysdev_attribute socinfo_v1_files[] = {
 	_SYSDEV_ATTR(id, 0444, socinfo_show_id, NULL),
 	_SYSDEV_ATTR(version, 0444, socinfo_show_version, NULL),
 	_SYSDEV_ATTR(build_id, 0444, socinfo_show_build_id, NULL),
+#ifdef CONFIG_SEC_PM
+	_SYSDEV_ATTR(soc_iddq, 0444, socinfo_show_soc_iddq, NULL),
+	_SYSDEV_ATTR(soc_pvs, 0444, socinfo_show_soc_pvs, NULL),
+#endif
 };
 
 static struct sysdev_attribute socinfo_v2_files[] = {
@@ -1186,15 +1145,6 @@ static struct sysdev_attribute socinfo_v7_files[] = {
 	_SYSDEV_ATTR(pmic_die_revision, 0444,
 			socinfo_show_pmic_die_revision, NULL),
 };
-
-#ifdef CONFIG_MACH_OPPO
-static struct sysdev_attribute socinfo_v9_files[] = {
-	_SYSDEV_ATTR(hw_pcb_version, 0444, socinfo_show_hw_pcb_version, NULL),
-};
-static struct sysdev_attribute socinfo_v10_files[] = {
-	_SYSDEV_ATTR(hw_rf_version, 0444, socinfo_show_hw_rf_version, NULL),
-};
-#endif
 
 static ssize_t
 msm_set_image_crm_version(struct device *dev,
@@ -1501,14 +1451,6 @@ static int __init socinfo_init_sysdev(void)
 
 	socinfo_create_files(&soc_sys_device, socinfo_v7_files,
 				ARRAY_SIZE(socinfo_v7_files));
-
-#ifdef CONFIG_MACH_OPPO
-	socinfo_create_files(&soc_sys_device, socinfo_v9_files,
-				ARRAY_SIZE(socinfo_v9_files));
-
-	socinfo_create_files(&soc_sys_device, socinfo_v10_files,
-				ARRAY_SIZE(socinfo_v10_files));
-#endif
 
 	return 0;
 

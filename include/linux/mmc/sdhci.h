@@ -18,6 +18,18 @@
 #include <linux/mmc/host.h>
 #include <linux/pm_qos.h>
 
+#define SDHCI_TRACE_RBUF_SZ_ORDER	10	/* 2^10 pages */
+#define SDHCI_TRACE_RBUF_SZ		\
+	(PAGE_SIZE * (1 << SDHCI_TRACE_RBUF_SZ_ORDER))
+#define SDHCI_TRACE_EVENT_SZ		256
+#define SDHCI_TRACE_RBUF_NUM_EVENTS	\
+	(SDHCI_TRACE_RBUF_SZ / SDHCI_TRACE_EVENT_SZ)
+
+#define	SDHCI_TRACE_COMM_LEN		12
+
+#define SDHCI_TRACE_EVENT_DATA_SZ \
+	SDHCI_TRACE_EVENT_SZ
+
 struct sdhci_next {
 	unsigned int sg_count;
 	s32 cookie;
@@ -28,6 +40,16 @@ enum sdhci_power_policy {
 	SDHCI_PERFORMANCE_MODE_INIT,
 	SDHCI_POWER_SAVE_MODE,
 };
+
+struct sdhci_trace_event {
+	char	data[SDHCI_TRACE_EVENT_DATA_SZ];
+};
+
+struct sdhci_trace_buffer {
+	struct sdhci_trace_event	*rbuf;
+	atomic_t			wr_idx;
+};
+
 
 struct sdhci_host {
 	/* Data set by hardware interface driver */
@@ -159,16 +181,15 @@ struct sdhci_host {
  */
 #define SDHCI_QUIRK2_DIVIDE_TOUT_BY_4 (1 << 8)
 
-#define SDHCI_QUIRK2_HOST_NO_CMD23			(1<<1)
-/* The system physically doesn't support 1.8v, even if the host does */
-#define SDHCI_QUIRK2_NO_1_8_V				(1<<2)
-#define SDHCI_QUIRK2_PRESET_VALUE_BROKEN		(1<<3)
-
 /*
  * Some SDHC controllers are unable to handle data-end bit error in
  * 1-bit mode of SDIO.
  */
 #define SDHCI_QUIRK2_IGN_DATA_END_BIT_ERROR             (1<<9)
+
+/* Start logging events */
+#define SDHCI_QUIRK2_TRACE_ON				(1<<10)
+
 	int irq;		/* Device IRQ */
 	void __iomem *ioaddr;	/* Mapped address */
 
@@ -199,8 +220,7 @@ struct sdhci_host {
 #define SDHCI_PV_ENABLED	(1<<8)	/* Preset value enabled */
 #define SDHCI_SDIO_IRQ_ENABLED	(1<<9)	/* SDIO irq enabled */
 #define SDHCI_HS200_NEEDS_TUNING (1<<10)	/* HS200 needs tuning */
-#define SDHCI_USING_RETUNING_TIMER (1<<11)	/* Host is using a retuning timer for the card */
-#define SDHCI_HS400_NEEDS_TUNING (1<<12)	/* HS400 needs tuning */
+#define SDHCI_HS400_NEEDS_TUNING (1<<11)	/* HS400 needs tuning */
 
 	unsigned int version;	/* SDHCI spec. version */
 
@@ -265,6 +285,7 @@ struct sdhci_host {
 	bool irq_enabled; /* host irq status flag */
 	bool async_int_supp;  /* async support to rxv int, when clks are off */
 	bool disable_sdio_irq_deferred; /* status of disabling sdio irq */
+	struct sdhci_trace_buffer trace_buf;
 	u32 auto_cmd_err_sts;
 	unsigned long private[0] ____cacheline_aligned;
 };

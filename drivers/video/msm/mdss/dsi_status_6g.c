@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -74,6 +74,7 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 		return;
 	}
 
+	mutex_lock(&ctrl_pdata->mutex);
 
 	/*
 	 * TODO: Because mdss_dsi_cmd_mdp_busy has made sure DMA to
@@ -82,16 +83,13 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 	 * lock to fix issues so that ESD thread would not block other
 	 * overlay operations. Need refine this lock for command mode
 	 */
-
-	mutex_lock(&ctl->offlock);
 	if (mipi->mode == DSI_CMD_MODE)
 		mutex_lock(&mdp5_data->ov_lock);
 
-	if (mdss_panel_is_power_off(pstatus_data->mfd->panel_power_state) ||
-			pstatus_data->mfd->shutdown_pending) {
+	if (pstatus_data->mfd->shutdown_pending) {
 		if (mipi->mode == DSI_CMD_MODE)
 			mutex_unlock(&mdp5_data->ov_lock);
-		mutex_unlock(&ctl->offlock);
+		mutex_unlock(&ctrl_pdata->mutex);
 		pr_err("%s: DSI turning off, avoiding panel status check\n",
 							__func__);
 		return;
@@ -112,13 +110,13 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 
 	pr_debug("%s: DSI ctrl wait for ping pong done\n", __func__);
 
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
 	ret = ctrl_pdata->check_status(ctrl_pdata);
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
 
 	if (mipi->mode == DSI_CMD_MODE)
 		mutex_unlock(&mdp5_data->ov_lock);
-	mutex_unlock(&ctl->offlock);
+	mutex_unlock(&ctrl_pdata->mutex);
 
 	if ((pstatus_data->mfd->panel_power_state == MDSS_PANEL_POWER_ON)) {
 		if (ret > 0) {

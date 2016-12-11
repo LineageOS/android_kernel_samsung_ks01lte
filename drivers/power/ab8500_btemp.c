@@ -1014,7 +1014,7 @@ static int __devinit ab8500_btemp_probe(struct platform_device *pdev)
 	}
 
 	/* Init work for measuring temperature periodically */
-	INIT_DELAYED_WORK_DEFERRABLE(&di->btemp_periodic_work,
+	INIT_DEFERRABLE_WORK(&di->btemp_periodic_work,
 		ab8500_btemp_periodic_work);
 
 	/* Identify the battery */
@@ -1115,7 +1115,7 @@ static void __exit ab8500_btemp_exit(void)
 	platform_driver_unregister(&ab8500_btemp_driver);
 }
 
-device_initcall(ab8500_btemp_init);
+subsys_initcall_sync(ab8500_btemp_init);
 module_exit(ab8500_btemp_exit);
 
 MODULE_LICENSE("GPL v2");

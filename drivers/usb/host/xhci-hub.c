@@ -627,13 +627,10 @@ static void xhci_hub_report_link_state(struct xhci_hcd *xhci,
 	u32 pls = status_reg & PORT_PLS_MASK;
 
 	/* resume state is a xHCI internal state.
-	 * Do not report it to usb core, instead, pretend to be U3,
-	 * thus usb core knows it's not ready for transfer
+	 * Do not report it to usb core.
 	 */
-	if (pls == XDEV_RESUME) {
-		*status |= USB_SS_PORT_LS_U3;
+	if (pls == XDEV_RESUME)
 		return;
-	}
 
 	/* When the CAS bit is set then warm reset
 	 * should be performed on port
@@ -1196,10 +1193,10 @@ int xhci_bus_suspend(struct usb_hcd *hcd)
 	spin_lock_irqsave(&xhci->lock, flags);
 
 	if (hcd->self.root_hub->do_remote_wakeup) {
-		if (bus_state->resuming_ports ||	/* USB2 */
-		    bus_state->port_remote_wakeup) {	/* USB3 */
+		if (bus_state->resuming_ports) {
 			spin_unlock_irqrestore(&xhci->lock, flags);
-			xhci_dbg(xhci, "suspend failed because a port is resuming\n");
+			xhci_dbg(xhci, "suspend failed because "
+						"a port is resuming\n");
 			return -EBUSY;
 		}
 	}
@@ -1245,22 +1242,6 @@ int xhci_bus_suspend(struct usb_hcd *hcd)
 		t1 = xhci_port_state_to_neutral(t1);
 		if (t1 != t2) {
 			xhci_writel(xhci, t2, port_array[port_index]);
-			if (xhci->quirks & XHCI_PORTSC_DELAY)
-				ndelay(100);
-		}
-
-		if (hcd->speed != HCD_USB3) {
-			/* enable remote wake up for USB 2.0 */
-			__le32 __iomem *addr;
-			u32 tmp;
-
-			/* Add one to the port status register address to get
-			 * the port power control register address.
-			 */
-			addr = port_array[port_index] + 1;
-			tmp = xhci_readl(xhci, addr);
-			tmp |= PORT_RWE;
-			xhci_writel(xhci, tmp, addr);
 			if (xhci->quirks & XHCI_PORTSC_DELAY)
 				ndelay(100);
 		}
@@ -1342,22 +1323,6 @@ int xhci_bus_resume(struct usb_hcd *hcd)
 				xhci_ring_device(xhci, slot_id);
 		} else {
 			xhci_writel(xhci, temp, port_array[port_index]);
-			if (xhci->quirks & XHCI_PORTSC_DELAY)
-				ndelay(100);
-		}
-
-		if (hcd->speed != HCD_USB3) {
-			/* disable remote wake up for USB 2.0 */
-			__le32 __iomem *addr;
-			u32 tmp;
-
-			/* Add one to the port status register address to get
-			 * the port power control register address.
-			 */
-			addr = port_array[port_index] + 1;
-			tmp = xhci_readl(xhci, addr);
-			tmp &= ~PORT_RWE;
-			xhci_writel(xhci, tmp, addr);
 			if (xhci->quirks & XHCI_PORTSC_DELAY)
 				ndelay(100);
 		}

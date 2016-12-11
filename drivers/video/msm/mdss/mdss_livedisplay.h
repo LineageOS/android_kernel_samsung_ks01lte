@@ -21,40 +21,7 @@
 #include "mdss_dsi.h"
 #include "mdss_fb.h"
 
-#define MAX_PRESETS 10
-
 struct mdss_livedisplay_ctx {
-	uint8_t cabc_ui_value;
-	uint8_t cabc_image_value;
-	uint8_t cabc_video_value;
-	uint8_t sre_weak_value;
-	uint8_t sre_medium_value;
-	uint8_t sre_strong_value;
-	uint8_t aco_value;
-
-	const uint8_t *ce_off_cmds;
-	const uint8_t *ce_on_cmds;
-	unsigned int ce_off_cmds_len;
-	unsigned int ce_on_cmds_len;
-
-	const uint8_t *presets[MAX_PRESETS];
-	unsigned int presets_len[MAX_PRESETS];
-
-	const uint8_t *cabc_cmds;
-	unsigned int cabc_cmds_len;
-
-	const uint8_t *post_cmds;
-	unsigned int post_cmds_len;
-
-	unsigned int preset;
-	unsigned int cabc_level;
-	unsigned int sre_level;
-	bool aco_enabled;
-	bool ce_enabled;
-
-	unsigned int num_presets;
-	unsigned int caps;
-
 	uint32_t r, g, b;
 
 	struct msm_fb_data_type *mfd;
@@ -65,22 +32,6 @@ struct mdss_livedisplay_ctx {
 
 	uint32_t updated;
 	uint8_t *cmd_buf;
-};
-
-enum {
-	CABC_OFF,
-	CABC_UI,
-	CABC_IMAGE,
-	CABC_VIDEO,
-	CABC_MAX
-};
-
-enum {
-	SRE_OFF,
-	SRE_WEAK,
-	SRE_MEDIUM,
-	SRE_STRONG,
-	SRE_MAX
 };
 
 enum {
@@ -96,11 +47,6 @@ enum {
 void mdss_livedisplay_update(struct mdss_livedisplay_ctx *mlc, uint32_t updated);
 int mdss_livedisplay_parse_dt(struct device_node *np, struct mdss_panel_info *pinfo);
 int mdss_livedisplay_create_sysfs(struct msm_fb_data_type *mfd);
-
-static inline bool is_cabc_cmd(uint32_t value)
-{
-    return (value & MODE_CABC) || (value & MODE_SRE) || (value & MODE_AUTO_CONTRAST);
-}
 
 static inline struct mdss_livedisplay_ctx* get_ctx(struct msm_fb_data_type *mfd)
 {

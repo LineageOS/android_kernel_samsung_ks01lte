@@ -74,11 +74,7 @@ module_param(ss_phy_override_deemphasis, int, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(ss_phy_override_deemphasis, "Override SSPHY demphasis value");
 
 /* Enable Proprietary charger detection */
-#ifdef CONFIG_MACH_OPPO
-static bool prop_chg_detect = 1;
-#else
 static bool prop_chg_detect;
-#endif
 module_param(prop_chg_detect, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(prop_chg_detect, "Enable Proprietary charger detection");
 
@@ -255,10 +251,6 @@ struct dwc3_msm {
 	bool ext_chg_opened;
 	bool ext_chg_active;
 	struct completion ext_chg_wait;
-
-#ifdef CONFIG_MACH_OPPO
-	unsigned int		power_now;
-#endif
 };
 
 #define USB_HSPHY_3P3_VOL_MIN		3050000 /* uV */
@@ -901,7 +893,7 @@ static int dwc3_msm_ep_queue(struct usb_ep *ep,
 	 * Override req->complete function, but before doing that,
 	 * store it's original pointer in the req_complete_list.
 	 */
-	req_complete = kzalloc(sizeof(*req_complete), GFP_KERNEL);
+	req_complete = kzalloc(sizeof(*req_complete), gfp_flags);
 	if (!req_complete) {
 		dev_err(mdwc->dev, "%s: not enough memory\n", __func__);
 		return -ENOMEM;
@@ -1472,7 +1464,7 @@ static void dwc3_msm_ss_phy_reg_init(struct dwc3_msm *mdwc)
 	data &= ~(1 << 6);
 	data |= (1 << 7);
 	data &= ~(0x7 << 8);
-	data |= (0x3 << 8);
+	data |= (0x4 << 8);
 	data |= (0x1 << 11);
 	dwc3_msm_ssusb_write_phycreg(mdwc->base, 0x1006, data);
 
@@ -2005,16 +1997,12 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc)
 	if (!host_bus_suspend)
 		dwc3_msm_config_gdsc(mdwc, 0);
 
+	clk_disable_unprepare(mdwc->iface_clk);
+	clk_disable_unprepare(mdwc->utmi_clk);
+
 	if (!host_ss_suspend) {
 		clk_disable_unprepare(mdwc->core_clk);
 		mdwc->lpm_flags |= MDWC3_PHY_REF_AND_CORECLK_OFF;
-	}
-	clk_disable_unprepare(mdwc->iface_clk);
-
-	if (!host_bus_suspend)
-		clk_disable_unprepare(mdwc->utmi_clk);
-
-	if (!host_bus_suspend) {
 		/* USB PHY no more requires TCXO */
 		clk_disable_unprepare(mdwc->xo_clk);
 		mdwc->lpm_flags |= MDWC3_TCXO_SHUTDOWN;
@@ -2100,8 +2088,7 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 	if (!host_bus_suspend)
 		dwc3_msm_config_gdsc(mdwc, 1);
 
-	if (!host_bus_suspend)
-		clk_prepare_enable(mdwc->utmi_clk);
+	clk_prepare_enable(mdwc->utmi_clk);
 
 	if (mdwc->otg_xceiv && mdwc->ext_xceiv.otg_capability && !dcp &&
 							!host_bus_suspend)
@@ -2406,11 +2393,6 @@ static int dwc3_msm_power_get_property_usb(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		val->intval = get_prop_usbin_voltage_now(mdwc);
 		break;
-#ifdef CONFIG_MACH_OPPO
-	case POWER_SUPPLY_PROP_POWER_NOW:
-		val->intval = mdwc->power_now;
-		break;
-#endif
 	default:
 		return -EINVAL;
 	}
@@ -2462,11 +2444,6 @@ static int dwc3_msm_power_set_property_usb(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_TYPE:
 		psy->type = val->intval;
 		break;
-#ifdef CONFIG_MACH_OPPO
-	case POWER_SUPPLY_PROP_POWER_NOW:
-		mdwc->power_now = val->intval;
-		break;
-#endif
 	default:
 		return -EINVAL;
 	}
@@ -2528,9 +2505,6 @@ static enum power_supply_property dwc3_msm_pm_power_props_usb[] = {
 	POWER_SUPPLY_PROP_TYPE,
 	POWER_SUPPLY_PROP_SCOPE,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
-#ifdef CONFIG_MACH_OPPO
-	POWER_SUPPLY_PROP_POWER_NOW,
-#endif
 };
 
 static void dwc3_init_adc_work(struct work_struct *w);
@@ -2903,6 +2877,8 @@ unreg_chrdev:
 	return ret;
 }
 
+#include "dwc3-sec.c"
+
 static int __devinit dwc3_msm_probe(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node, *dwc3_node;
@@ -3264,7 +3240,7 @@ static int __devinit dwc3_msm_probe(struct platform_device *pdev)
 	/* usb_psy required only for vbus_notifications or charging support */
 	if (mdwc->ext_xceiv.otg_capability ||
 			!mdwc->charger.charging_disabled) {
-		mdwc->usb_psy.name = "usb";
+		mdwc->usb_psy.name = "dwc-usb";
 		mdwc->usb_psy.type = POWER_SUPPLY_TYPE_USB;
 		mdwc->usb_psy.supplied_to = dwc3_msm_pm_power_supplied_to;
 		mdwc->usb_psy.num_supplicants = ARRAY_SIZE(
@@ -3320,6 +3296,12 @@ static int __devinit dwc3_msm_probe(struct platform_device *pdev)
 	/* Register with OTG if present, ignore USB2 OTG using other PHY */
 	if (mdwc->otg_xceiv &&
 			!(mdwc->otg_xceiv->flags & ENABLE_SECONDARY_PHY)) {
+		pr_info("dwc3-msm: sec_otg_init is called.\n");
+		sec_otg_init(mdwc, mdwc->otg_xceiv);
+#ifdef CONFIG_USB_HOST_NOTIFY
+		get_vbus_detect_gpio(mdwc, &pdev->dev);
+#endif
+
 		/* Skip charger detection for simulator targets */
 		if (!mdwc->charger.skip_chg_detect) {
 			mdwc->charger.start_detection = dwc3_start_chg_det;

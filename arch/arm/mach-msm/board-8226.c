@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,6 +30,7 @@
 #include <linux/regulator/onsemi-ncp6335d.h>
 #include <linux/regulator/qpnp-regulator.h>
 #include <linux/msm_tsens.h>
+#include <linux/export.h>
 #include <asm/mach/map.h>
 #include <asm/hardware/gic.h>
 #include <asm/mach/arch.h>
@@ -39,6 +40,12 @@
 #include <mach/gpiomux.h>
 #include <mach/msm_iomap.h>
 #include <mach/restart.h>
+#ifdef CONFIG_SEC_DEBUG
+#include <mach/sec_debug.h>
+#endif
+#ifdef CONFIG_ANDROID_PERSISTENT_RAM
+#include <linux/persistent_ram.h>
+#endif
 #include <mach/msm_memtypes.h>
 #include <mach/socinfo.h>
 #include <mach/board.h>
@@ -56,12 +63,35 @@
 #include "modem_notifier.h"
 #include "spm-regulator.h"
 
-static struct of_dev_auxdata msm_hsic_host_adata[] = {
-	OF_DEV_AUXDATA("qcom,hsic-host", 0xF9A00000, "msm_hsic_host", NULL),
-	{}
+#ifdef CONFIG_PROC_AVC
+#include <linux/proc_avc.h>
+#endif
+
+#ifdef CONFIG_ANDROID_PERSISTENT_RAM
+/* CONFIG_SEC_DEBUG reserving memory for persistent RAM*/
+#define RAMCONSOLE_PHYS_ADDR 0x1FB00000
+static struct persistent_ram_descriptor per_ram_descs[] __initdata = {
+       {
+               .name = "ram_console",
+               .size = SZ_1M,
+       }
 };
 
+static struct persistent_ram per_ram __initdata = {
+       .descs = per_ram_descs,
+       .num_descs = ARRAY_SIZE(per_ram_descs),
+       .start = RAMCONSOLE_PHYS_ADDR,
+       .size = SZ_1M
+};
+#endif
+
 static struct of_dev_auxdata msm8226_auxdata_lookup[] __initdata = {
+	OF_DEV_AUXDATA("qcom,msm-sdcc", 0xF9824000, \
+			"msm_sdcc.1", NULL),
+	OF_DEV_AUXDATA("qcom,msm-sdcc", 0xF98A4000, \
+			"msm_sdcc.2", NULL),
+	OF_DEV_AUXDATA("qcom,msm-sdcc", 0xF9864000, \
+			"msm_sdcc.3", NULL),
 	OF_DEV_AUXDATA("qcom,sdhci-msm", 0xF9824900, \
 			"msm_sdcc.1", NULL),
 	OF_DEV_AUXDATA("qcom,sdhci-msm", 0xF98A4900, \
@@ -69,8 +99,6 @@ static struct of_dev_auxdata msm8226_auxdata_lookup[] __initdata = {
 	OF_DEV_AUXDATA("qcom,sdhci-msm", 0xF9864900, \
 			"msm_sdcc.3", NULL),
 	OF_DEV_AUXDATA("qcom,hsic-host", 0xF9A00000, "msm_hsic_host", NULL),
-	OF_DEV_AUXDATA("qcom,hsic-smsc-hub", 0, "msm_smsc_hub",
-			msm_hsic_host_adata),
 
 	{}
 };
@@ -78,6 +106,9 @@ static struct of_dev_auxdata msm8226_auxdata_lookup[] __initdata = {
 static void __init msm8226_reserve(void)
 {
 	of_scan_flat_dt(dt_scan_for_memory_reserve, NULL);
+#ifdef CONFIG_ANDROID_PERSISTENT_RAM
+	persistent_ram_early_init(&per_ram);
+#endif
 }
 
 /*
@@ -108,11 +139,46 @@ void __init msm8226_add_drivers(void)
 	tsens_tm_init_driver();
 	msm_thermal_device_init();
 }
+struct class *sec_class;
+EXPORT_SYMBOL(sec_class);
+
+static void samsung_sys_class_init(void)
+{
+	pr_info("samsung sys class init.\n");
+
+	sec_class = class_create(THIS_MODULE, "sec");
+
+	if (IS_ERR(sec_class)) {
+		pr_err("Failed to create class(sec)!\n");
+		return;
+	}
+
+	pr_info("samsung sys class end.\n");
+};
+
+#if defined(CONFIG_BATTERY_SAMSUNG)
+#if (defined(CONFIG_SEC_MILLET_PROJECT) || defined(CONFIG_SEC_MATISSE_PROJECT) ||defined(CONFIG_SEC_BERLUTI_PROJECT))
+/* Dummy init function for models that use QUALCOMM PMIC PM8226 charger*/
+void __init samsung_init_battery(void)
+{
+	pr_err("%s: Battery init dummy, using PM8226 internal charger \n", __func__);
+};
+#else
+extern void __init samsung_init_battery(void);
+#endif
+#endif
 
 void __init msm8226_init(void)
 {
 	struct of_dev_auxdata *adata = msm8226_auxdata_lookup;
 
+#ifdef CONFIG_SEC_DEBUG
+	sec_debug_init();
+#endif
+
+#ifdef CONFIG_PROC_AVC
+	sec_avc_log_init();
+#endif
 	/*
 	 * populate devices from DT first so smem probe will get called as part
 	 * of msm_smem_init.  socinfo_init needs smem support so call
@@ -122,12 +188,18 @@ void __init msm8226_init(void)
 	board_dt_populate(adata);
 
 	msm_smem_init();
+>>>>>>> 3462df8... msm: reorder init calls in board's init_machine handler
 
 	if (socinfo_init() < 0)
 		pr_err("%s: socinfo_init() failed\n", __func__);
 
 	msm8226_init_gpiomux();
+	board_dt_populate(adata);
+	samsung_sys_class_init();
 	msm8226_add_drivers();
+#if defined(CONFIG_BATTERY_SAMSUNG)
+	samsung_init_battery();
+#endif
 }
 
 static const char *msm8226_dt_match[] __initconst = {
@@ -137,7 +209,7 @@ static const char *msm8226_dt_match[] __initconst = {
 	NULL
 };
 
-DT_MACHINE_START(MSM8226_DT, "Qualcomm MSM 8x26 / MSM 8x28 (Flattened Device Tree)")
+DT_MACHINE_START(MSM8226_DT, "Qualcomm MSM 8226 (Flattened Device Tree)")
 	.map_io = msm_map_msm8226_io,
 	.init_irq = msm_dt_init_irq,
 	.init_machine = msm8226_init,

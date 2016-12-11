@@ -141,8 +141,7 @@ static int xhci_start(struct xhci_hcd *xhci)
 				"waited %u microseconds.\n",
 				XHCI_MAX_HALT_USEC);
 	if (!ret)
-		xhci->xhc_state &= ~(XHCI_STATE_HALTED | XHCI_STATE_DYING);
-
+		xhci->xhc_state &= ~XHCI_STATE_HALTED;
 	return ret;
 }
 
@@ -396,7 +395,7 @@ static inline void xhci_cleanup_msix(struct xhci_hcd *xhci)
 {
 }
 
-#endif /* CONFIG_PCI */
+#endif
 
 static void compliance_mode_recovery(unsigned long arg)
 {
@@ -3380,9 +3379,6 @@ int xhci_discover_or_reset_device(struct usb_hcd *hcd, struct usb_device *udev)
 		else
 			return -EINVAL;
 	}
-
-	if (virt_dev->tt_info)
-		old_active_eps = virt_dev->tt_info->active_eps;
 
 	if (virt_dev->udev != udev) {
 		/* If the virt_dev and the udev does not match, this virt_dev

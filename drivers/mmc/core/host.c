@@ -47,28 +47,9 @@ static int mmc_host_runtime_suspend(struct device *dev)
 		return 0;
 
 	ret = mmc_suspend_host(host);
-	if (ret < 0 && ret != -ENOMEDIUM)
+	if (ret < 0)
 		pr_err("%s: %s: suspend host failed: %d\n", mmc_hostname(host),
 		       __func__, ret);
-
-	/*
-	 * During card detection within mmc_rescan(), mmc_rpm_hold() will
-	 * be called on host->class_dev before initializing the card and
-	 * shall be released after card detection.
-	 *
-	 * During card detection, once the card device is added, MMC block
-	 * driver probe gets called and in case that probe fails due to some
-	 * block read/write cmd error, then the block driver marks that card
-	 * as removed. Later when mmc_rpm_release() is called within
-	 * mmc_rescan(), the runtime suspend of host->class_dev will be invoked
-	 * immediately. The commands that are sent during runtime would fail
-	 * with -ENOMEDIUM and if we propagate the same to rpm framework, the
-	 * runtime suspend/resume for this device will never be invoked even
-	 * if the card is detected fine later on when it is removed and
-	 * inserted again. Hence, do not report this error to upper layers.
-	 */
-	if (ret == -ENOMEDIUM)
-		ret = 0;
 
 	return ret;
 }
@@ -548,37 +529,6 @@ out:
 	return retval;
 }
 
-static ssize_t show_scale_down_in_low_wr_load(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct mmc_host *host = cls_dev_to_mmc_host(dev);
-
-	if (!host)
-		return -EINVAL;
-
-	return snprintf(buf, PAGE_SIZE, "%d\n",
-		host->clk_scaling.scale_down_in_low_wr_load);
-}
-
-static ssize_t store_scale_down_in_low_wr_load(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct mmc_host *host = cls_dev_to_mmc_host(dev);
-	unsigned long value;
-	int retval = -EINVAL;
-
-	if (!host)
-		goto out;
-
-	if (!host->card || kstrtoul(buf, 0, &value))
-		goto out;
-
-	host->clk_scaling.scale_down_in_low_wr_load = value;
-
-out:
-	return retval;
-}
-
 static ssize_t show_up_threshold(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -671,16 +621,12 @@ DEVICE_ATTR(up_threshold, S_IRUGO | S_IWUSR,
 		show_up_threshold, store_up_threshold);
 DEVICE_ATTR(down_threshold, S_IRUGO | S_IWUSR,
 		show_down_threshold, store_down_threshold);
-DEVICE_ATTR(scale_down_in_low_wr_load, S_IRUGO | S_IWUSR,
-		show_scale_down_in_low_wr_load,
-		store_scale_down_in_low_wr_load);
 
 static struct attribute *clk_scaling_attrs[] = {
 	&dev_attr_enable.attr,
 	&dev_attr_up_threshold.attr,
 	&dev_attr_down_threshold.attr,
 	&dev_attr_polling_interval.attr,
-	&dev_attr_scale_down_in_low_wr_load.attr,
 	NULL,
 };
 
@@ -768,7 +714,7 @@ int mmc_add_host(struct mmc_host *host)
 	err = pm_runtime_set_active(&host->class_dev);
 	if (err)
 		pr_err("%s: %s: failed setting runtime active: err: %d\n",
-		       mmc_hostname(host), __func__, err);
+				mmc_hostname(host), __func__, err);
 	else if (mmc_use_core_runtime_pm(host))
 		pm_runtime_enable(&host->class_dev);
 
@@ -787,7 +733,6 @@ int mmc_add_host(struct mmc_host *host)
 	host->clk_scaling.up_threshold = 35;
 	host->clk_scaling.down_threshold = 5;
 	host->clk_scaling.polling_delay_ms = 100;
-	host->clk_scaling.scale_down_in_low_wr_load = false;
 
 	err = sysfs_create_group(&host->class_dev.kobj, &clk_scaling_attr_grp);
 	if (err)

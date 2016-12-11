@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -29,9 +29,6 @@
 #define MDSS_REG_READ(addr) readl_relaxed(mdss_res->mdp_base + addr)
 
 #define MAX_DRV_SUP_MMB_BLKS	44
-
-#define MDSS_PINCTRL_STATE_DEFAULT "mdss_default"
-#define MDSS_PINCTRL_STATE_SLEEP  "mdss_sleep"
 
 enum mdss_mdp_clk_type {
 	MDSS_CLK_AHB,
@@ -67,6 +64,11 @@ struct mdss_debug_inf {
 	void *debug_data;
 	int (*debug_dump_stats)(void *data, char *buf, int len);
 	void (*debug_enable_clock)(int on);
+};
+
+struct mdss_perf_tune {
+	unsigned long min_mdp_clk;
+	u64 min_bus_vote;
 };
 
 #define MDSS_IRQ_SUSPEND	-1
@@ -130,7 +132,6 @@ struct mdss_data_type {
 	u32 has_decimation;
 	u8 has_wfd_blk;
 	u32 has_no_lut_read;
-	atomic_t sd_client_count;
 	u8 has_wb_ad;
 	bool idle_pc_enabled;
 
@@ -142,9 +143,6 @@ struct mdss_data_type {
 	u8 clk_ena;
 	u8 fs_ena;
 	u8 vsync_ena;
-	unsigned long min_mdp_clk;
-
-	struct notifier_block gdsc_cb;
 
 	u32 res_init;
 
@@ -163,6 +161,8 @@ struct mdss_data_type {
 	u32 bus_hdl;
 	struct msm_bus_scale_pdata *bus_scale_table;
 
+	u32 reg_bus_hdl;
+
 	struct mdss_fudge_factor ab_factor;
 	struct mdss_fudge_factor ib_factor;
 	struct mdss_fudge_factor ib_factor_overlap;
@@ -170,6 +170,9 @@ struct mdss_data_type {
 
 	u32 *clock_levels;
 	u32 nclk_lvl;
+
+	u32 enable_bw_release;
+	u32 enable_rotator_bw_release;
 
 	struct mdss_hw_settings *hw_settings;
 
@@ -193,7 +196,8 @@ struct mdss_data_type {
 	void *video_intf;
 	u32 nintf;
 
-	u32 pp_bus_hdl;
+	int pp_enable;
+
 	struct mdss_mdp_ad *ad_off;
 	struct mdss_ad_info *ad_cfgs;
 	u32 nad_cfgs;
@@ -214,11 +218,9 @@ struct mdss_data_type {
 	int handoff_pending;
 	struct mdss_prefill_data prefill_data;
 	bool idle_pc;
-	bool allow_cx_vddmin;
-	bool vdd_cx_en;
-	int iommu_ref_cnt;
+	struct mdss_perf_tune perf_tune;
 	atomic_t active_intf_cnt;
-
+	int iommu_ref_cnt;
 	u64 ab[MDSS_MAX_HW_BLK];
 	u64 ib[MDSS_MAX_HW_BLK];
 };
@@ -234,6 +236,7 @@ int mdss_register_irq(struct mdss_hw *hw);
 void mdss_enable_irq(struct mdss_hw *hw);
 void mdss_disable_irq(struct mdss_hw *hw);
 void mdss_disable_irq_nosync(struct mdss_hw *hw);
+
 void mdss_bus_bandwidth_ctrl(int enable);
 int mdss_iommu_ctrl(int enable);
 int mdss_bus_scale_set_quota(int client, u64 ab_quota, u64 ib_quota);
@@ -261,13 +264,5 @@ static inline int mdss_get_iommu_domain(u32 type)
 		return -ENODEV;
 
 	return mdss_res->iommu_map[type].domain_idx;
-}
-
-static inline int mdss_get_sd_client_cnt(void)
-{
-	if (!mdss_res)
-		return 0;
-	else
-		return atomic_read(&mdss_res->sd_client_count);
 }
 #endif /* MDSS_H */

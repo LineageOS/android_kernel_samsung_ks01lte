@@ -361,6 +361,10 @@ static int msm_pcm_ioctl(struct snd_pcm_substream *substream,
 	return ret;
 }
 
+#if defined(CONFIG_SND_SOC_ES325) || defined (CONFIG_SND_SOC_ES325_ATLANTIC) && !defined(CONFIG_SEC_LOCALE_KOR_H) && !defined(CONFIG_SEC_LOCALE_KOR_FRESCO)
+int es325_set_VEQ_max_gain(int volume);
+#endif
+
 static int msm_voice_gain_put(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
@@ -382,6 +386,9 @@ static int msm_voice_gain_put(struct snd_kcontrol *kcontrol,
 
 	voc_set_rx_vol_step(session_id, RX_PATH, volume, ramp_duration);
 
+#if defined(CONFIG_SND_SOC_ES325) || defined (CONFIG_SND_SOC_ES325_ATLANTIC) && !defined(CONFIG_SEC_LOCALE_KOR_H) && !defined(CONFIG_SEC_LOCALE_KOR_FRESCO) && !defined(CONFIG_SEC_JACTIVE_PROJECT)
+	es325_set_VEQ_max_gain(volume);
+#endif
 done:
 	return ret;
 }

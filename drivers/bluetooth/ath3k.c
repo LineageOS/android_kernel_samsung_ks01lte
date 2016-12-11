@@ -95,9 +95,12 @@ static struct usb_device_id ath3k_table[] = {
 	{ USB_DEVICE(0x0CF3, 0x817a) },
 	{ USB_DEVICE(0x0cf3, 0xe003) },
 	{ USB_DEVICE(0x0CF3, 0xE004) },
+<<<<<<< HEAD
+=======
 	{ USB_DEVICE(0x0CF3, 0xE005) },
 	{ USB_DEVICE(0x13d3, 0x3362) },
 	{ USB_DEVICE(0x13d3, 0x3375) },
+>>>>>>> 6068c8a... Merge branch 'linux-3.4.y' of git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable into cm-13.0
 	{ USB_DEVICE(0x13d3, 0x3393) },
 	{ USB_DEVICE(0x13d3, 0x3402) },
 	{ USB_DEVICE(0x13d3, 0x3408) },
@@ -143,11 +146,20 @@ static struct usb_device_id ath3k_blist_tbl[] = {
 	{ USB_DEVICE(0x0cf3, 0x311D), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x0cf3, 0x3121), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x0CF3, 0x817a), .driver_info = BTUSB_ATH3012 },
+<<<<<<< HEAD
+	{ USB_DEVICE(0x13d3, 0x3375), .driver_info = BTUSB_ATH3012 },
+<<<<<<< HEAD
+	{ USB_DEVICE(0x04ca, 0x3005), .driver_info = BTUSB_ATH3012 },
+	{ USB_DEVICE(0x13d3, 0x3362), .driver_info = BTUSB_ATH3012 },
+	{ USB_DEVICE(0x0cf3, 0xe004), .driver_info = BTUSB_ATH3012 },
+=======
+=======
 	{ USB_DEVICE(0x0cf3, 0xe004), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x0cf3, 0xe005), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x0cf3, 0xe003), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x13d3, 0x3362), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x13d3, 0x3375), .driver_info = BTUSB_ATH3012 },
+>>>>>>> 6068c8a... Merge branch 'linux-3.4.y' of git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable into cm-13.0
 	{ USB_DEVICE(0x13d3, 0x3393), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x13d3, 0x3402), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x13d3, 0x3408), .driver_info = BTUSB_ATH3012 },
@@ -158,6 +170,10 @@ static struct usb_device_id ath3k_blist_tbl[] = {
 	/* Atheros AR5BBU22 with sflash firmware */
 	{ USB_DEVICE(0x0489, 0xE03C), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x0489, 0xE036), .driver_info = BTUSB_ATH3012 },
+<<<<<<< HEAD
+>>>>>>> f3f4500... ath3k: add support of 13d3:3474 AR3012 device
+=======
+>>>>>>> 6068c8a... Merge branch 'linux-3.4.y' of git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable into cm-13.0
 
 	{ }	/* Terminating entry */
 };

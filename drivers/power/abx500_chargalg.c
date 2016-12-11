@@ -1698,7 +1698,7 @@ static ssize_t abx500_chargalg_sysfs_charger(struct kobject *kobj,
 static struct attribute abx500_chargalg_en_charger = \
 {
 	.name = "chargalg",
-	.mode = S_IWUSR,
+	.mode = S_IWUGO,
 };
 
 static struct attribute *abx500_chargalg_chg[] = {
@@ -1848,9 +1848,9 @@ static int __devinit abx500_chargalg_probe(struct platform_device *pdev)
 	}
 
 	/* Init work for chargalg */
-	INIT_DELAYED_WORK_DEFERRABLE(&di->chargalg_periodic_work,
+	INIT_DEFERRABLE_WORK(&di->chargalg_periodic_work,
 		abx500_chargalg_periodic_work);
-	INIT_DELAYED_WORK_DEFERRABLE(&di->chargalg_wd_work,
+	INIT_DEFERRABLE_WORK(&di->chargalg_wd_work,
 		abx500_chargalg_wd_work);
 
 	/* Init work for chargalg */

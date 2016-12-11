@@ -275,12 +275,6 @@ Optional properties:
 				used to reduce the pending writes limit dynamically
 				and can be tuned to match performance requirements
 				depending upon system state.
-- qcom,mdss-clk-levels:		This array indicates the mdp core clock level selection
-				array. Core clock is calculated for each frame and
-				hence depending upon calculated value, clock rate
-				will be rounded up to the next level according to
-				this table. Order of entries need to be ordered in
-				ascending order.
 
 Fudge Factors:			Fudge factors are used to boost demand for
 				resources like bus bandswidth, clk rate etc. to
@@ -348,9 +342,6 @@ Subnode properties:
 			 Example: Width = 1920, Height = 1080, BytesPerPixel = 4,
 			 Number of frame-buffers reserved = 2.
 			 Size = 1920*1080*4*2 = ROUND_1MB(15.8MB) = 16MB.
-- qcom,mdss-idle-power-collapse-enabled: Boolean property that enables support
-					for mdss power collapse in idle
-					screen use cases with smart panels.
 
 Example:
 	mdss_mdp: qcom,mdss_mdp@fd900000 {
@@ -380,9 +371,6 @@ Example:
 		qcom,mdss-ib-factor = <3 2>;		/* 1.5 times  */
 		qcom,mdss-clk-factor = <5 4>;		/* 1.25 times */
 
-		/* Clock levels */
-		qcom,mdss-clk-levels = <92310000, 177780000, 200000000>;
-
 		qcom,max-clk-rate = <320000000>;
 		qcom,vbif-settings = <0x0004 0x00000001>,
 				     <0x00D8 0x00000707>;
@@ -404,17 +392,6 @@ Example:
 		qcom,mdss-pipe-vig-xin-id = <0 4 8>;
 		qcom,mdss-pipe-rgb-xin-id = <1 5 9>;
 		qcom,mdss-pipe-dma-xin-id = <2 10>;
-
-		qcom,mdss-smp-data = <22 4096>;
-		qcom,mdss-rot-block-size = <64>;
-		qcom,mdss-rotator-ot-limit = <2>;
-		qcom,mdss-smp-mb-per-pipe = <2>;
-		qcom,mdss-pref-prim-intf = "dsi";
-		qcom,mdss-has-bwc;
-		qcom,mdss-has-decimation;
-		qcom,mdss-has-wfd-blk;
-		qcom,mdss-no-lut-read;
-
 		qcom,mdss-pipe-vig-clk-ctrl-offsets = <0x3AC 0 0>,
 						      <0x3B4 0 0>,
 						      <0x3BC 0 0>,
@@ -427,6 +404,16 @@ Example:
 
 		qcom,mdss-pipe-dma-clk-ctrl-offsets = <0x3AC 8 12>,
 						      <0x3B4 8 12>;
+
+		qcom,mdss-smp-data = <22 4096>;
+		qcom,mdss-rot-block-size = <64>;
+		qcom,mdss-rotator-ot-limit = <2>;
+		qcom,mdss-smp-mb-per-pipe = <2>;
+		qcom,mdss-pref-prim-intf = "dsi";
+		qcom,mdss-has-bwc;
+		qcom,mdss-has-decimation;
+		qcom,mdss-has-wfd-blk;
+		qcom,mdss-no-lut-read;
 
 		qcom,mdss-ctl-off = <0x00000600 0x00000700 0x00000800
 				     0x00000900 0x0000A00>;
@@ -448,7 +435,6 @@ Example:
 		qcom,mdss-prefill-post-scaler-buffer-pixels = <2048>;
 		qcom,mdss-prefill-pingpong-buffer-pixels = <5120>;
 		qcom,mdss-prefill-fbc-lines = <2>;
-		qcom,mdss-idle-power-collapse-enabled;
 
 		mdss_fb0: qcom,mdss_fb_primary {
 			cell-index = <0>;

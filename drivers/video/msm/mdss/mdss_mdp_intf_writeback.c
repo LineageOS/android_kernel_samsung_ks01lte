@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,6 +19,12 @@
 
 #define VBIF_WR_LIM_CONF    0xC0
 #define MDSS_DEFAULT_OT_SETTING    0x10
+
+/*
+ * if BWC enabled and format is H1V2 or 420, do not use site C or I.
+ * Hence, set the bits 29:26 in format register, as zero.
+ */
+#define BWC_FMT_MASK	0xC3FFFFFF
 
 enum mdss_mdp_writeback_type {
 	MDSS_MDP_WRITEBACK_TYPE_ROTATOR,
@@ -44,7 +50,7 @@ struct mdss_mdp_writeback_ctx {
 	struct mdss_mdp_format_params *dst_fmt;
 	u16 width;
 	u16 height;
-	struct mdss_mdp_img_rect dst_rect;
+	struct mdss_rect dst_rect;
 
 	u8 rot90;
 	u32 bwc_mode;
@@ -54,6 +60,9 @@ struct mdss_mdp_writeback_ctx {
 
 	spinlock_t wb_lock;
 	struct list_head vsync_handlers;
+
+	ktime_t start_time;
+	ktime_t end_time;
 };
 
 static struct mdss_mdp_writeback_ctx wb_ctx_list[MDSS_MDP_MAX_WRITEBACK] = {
@@ -181,6 +190,8 @@ static int mdss_mdp_writeback_format_setup(struct mdss_mdp_writeback_ctx *ctx,
 		     (fmt->bits[C1_B_Cb] << 2) |
 		     (fmt->bits[C0_G_Y] << 0);
 
+	dst_format &= BWC_FMT_MASK;
+
 	if (fmt->bits[C3_ALPHA] || fmt->alpha_enable) {
 		dst_format |= BIT(8); /* DSTC3_EN */
 		if (!fmt->alpha_enable)
@@ -211,13 +222,13 @@ static int mdss_mdp_writeback_format_setup(struct mdss_mdp_writeback_ctx *ctx,
 		   (ctx->dst_planes.ystride[3] << 16);
 	outsize = (ctx->dst_rect.h << 16) | ctx->dst_rect.w;
 
+	mdp_wb_write(ctx, MDSS_MDP_REG_WB_ALPHA_X_VALUE, 0xFF);
 	mdp_wb_write(ctx, MDSS_MDP_REG_WB_DST_FORMAT, dst_format);
 	mdp_wb_write(ctx, MDSS_MDP_REG_WB_DST_OP_MODE, opmode);
 	mdp_wb_write(ctx, MDSS_MDP_REG_WB_DST_PACK_PATTERN, pattern);
 	mdp_wb_write(ctx, MDSS_MDP_REG_WB_DST_YSTRIDE0, ystride0);
 	mdp_wb_write(ctx, MDSS_MDP_REG_WB_DST_YSTRIDE1, ystride1);
 	mdp_wb_write(ctx, MDSS_MDP_REG_WB_OUT_SIZE, outsize);
-	mdp_wb_write(ctx, MDSS_MDP_REG_WB_DST_WRITE_CONFIG, 0x58);
 
 	return 0;
 }
@@ -260,6 +271,8 @@ static int mdss_mdp_writeback_prepare_rot(struct mdss_mdp_ctl *ctl, void *arg)
 	struct mdss_mdp_writeback_ctx *ctx;
 	struct mdss_mdp_writeback_arg *wb_args;
 	struct mdss_mdp_rotator_session *rot;
+	struct mdss_data_type *mdata;
+	struct mdss_mdp_format_params *fmt;
 	u32 format;
 
 	ctx = (struct mdss_mdp_writeback_ctx *) ctl->priv_data;
@@ -272,6 +285,11 @@ static int mdss_mdp_writeback_prepare_rot(struct mdss_mdp_ctl *ctl, void *arg)
 	rot = (struct mdss_mdp_rotator_session *) wb_args->priv_data;
 	if (!rot) {
 		pr_err("unable to retrieve rot session ctl=%d\n", ctl->num);
+		return -ENODEV;
+	}
+	mdata = ctl->mdata;
+	if (!mdata) {
+		pr_err("no mdata attached to ctl=%d", ctl->num);
 		return -ENODEV;
 	}
 	pr_debug("rot setup wb_num=%d\n", ctx->wb_num);
@@ -292,10 +310,17 @@ static int mdss_mdp_writeback_prepare_rot(struct mdss_mdp_ctl *ctl, void *arg)
 
 	ctx->rot90 = !!(rot->flags & MDP_ROT_90);
 
+	fmt = mdss_mdp_get_format_params(rot->format);
+	if (!fmt) {
+		pr_err("invalid pipe format %d\n", rot->format);
+		return -EINVAL;
+	}
+
 	if (ctx->bwc_mode || ctx->rot90)
-		format = mdss_mdp_get_rotator_dst_format(rot->format, 1);
+		format = mdss_mdp_get_rotator_dst_format(rot->format,
+				ctx->rot90, ctx->bwc_mode);
 	else
-		format = mdss_mdp_get_rotator_dst_format(rot->format, 0);
+		format = rot->format;
 
 	if (ctx->rot90) {
 		ctx->opmode |= BIT(5); /* ROT 90 */
@@ -415,6 +440,7 @@ static int mdss_mdp_wb_wait4comp(struct mdss_mdp_ctl *ctl, void *arg)
 {
 	struct mdss_mdp_writeback_ctx *ctx;
 	int rc = 0;
+	u64 rot_time;
 
 	ctx = (struct mdss_mdp_writeback_ctx *) ctl->priv_data;
 	if (!ctx) {
@@ -436,15 +462,27 @@ static int mdss_mdp_wb_wait4comp(struct mdss_mdp_ctl *ctl, void *arg)
 		WARN(1, "writeback kickoff timed out (%d) ctl=%d\n",
 						rc, ctl->num);
 	} else {
+		ctx->end_time = ktime_get();
 		mdss_mdp_ctl_notify(ctl, MDP_NOTIFY_FRAME_DONE);
 		rc = 0;
 	}
 
 	mdss_iommu_ctrl(0);
 	mdss_bus_bandwidth_ctrl(false);
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF); /* clock off */
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false); /* clock off */
+
+	/* Set flag to release Controller Bandwidth */
+	ctl->perf_release_ctl_bw = true;
 
 	ctx->comp_cnt--;
+
+	if (!rc) {
+		rot_time = (u64)ktime_to_us(ctx->end_time) -
+				(u64)ktime_to_us(ctx->start_time);
+		pr_debug("ctx%d type:%d xin_id:%d intf_num:%d took %llu microsecs\n",
+			ctx->wb_num, ctx->type, ctx->xin_id,
+				ctx->intf_num, rot_time);
+	}
 
 	return rc;
 }
@@ -453,7 +491,7 @@ static int mdss_mdp_writeback_display(struct mdss_mdp_ctl *ctl, void *arg)
 {
 	struct mdss_mdp_writeback_ctx *ctx;
 	struct mdss_mdp_writeback_arg *wb_args;
-	u32 flush_bits, val, off;
+	u32 flush_bits, val, bit_off, reg_off;
 	int ret;
 
 	if (!ctl || !ctl->mdata)
@@ -474,11 +512,16 @@ static int mdss_mdp_writeback_display(struct mdss_mdp_ctl *ctl, void *arg)
 			ctx->wr_lim = ctl->mdata->rotator_ot_limit;
 		else
 			ctx->wr_lim = MDSS_DEFAULT_OT_SETTING;
-		off = (ctx->xin_id % 4) * 8;
-		val = readl_relaxed(ctl->mdata->vbif_base + VBIF_WR_LIM_CONF);
-		val &= ~(0xFF << off);
-		val |= (ctx->wr_lim) << off;
-		writel_relaxed(val, ctl->mdata->vbif_base + VBIF_WR_LIM_CONF);
+
+		reg_off = (ctx->xin_id / 4) * 4;
+		bit_off = (ctx->xin_id % 4) * 8;
+
+		val = readl_relaxed(ctl->mdata->vbif_base + VBIF_WR_LIM_CONF +
+			reg_off);
+		val &= ~(0xFF << bit_off);
+		val |= (ctx->wr_lim) << bit_off;
+		writel_relaxed(val, ctl->mdata->vbif_base + VBIF_WR_LIM_CONF +
+			reg_off);
 	}
 
 	wb_args = (struct mdss_mdp_writeback_arg *) arg;
@@ -506,10 +549,14 @@ static int mdss_mdp_writeback_display(struct mdss_mdp_ctl *ctl, void *arg)
 		pr_err("IOMMU attach failed\n");
 		return ret;
 	}
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
 	mdss_bus_bandwidth_ctrl(true);
+	ctx->start_time = ktime_get();
 	mdss_mdp_ctl_write(ctl, MDSS_MDP_REG_CTL_START, 1);
 	wmb();
+
+	pr_debug("ctx%d type:%d xin_id:%d intf_num:%d start\n",
+		ctx->wb_num, ctx->type, ctx->xin_id, ctx->intf_num);
 
 	ctx->comp_cnt++;
 
