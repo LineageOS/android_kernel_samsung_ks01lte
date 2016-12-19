@@ -407,6 +407,7 @@ static int i2c_qup_clk_path_init(struct platform_device *pdev,
 	};
 
 	*dev->clk_path_vote.pdata = (struct msm_bus_scale_pdata) {
+		.active_only  = dev->pdata->active_only,
 		.name         = pdev->name,
 		.num_usecases = 2,
 		.usecase      = usecases,
@@ -476,7 +477,8 @@ static void i2c_qup_clk_path_postponed_register(struct qup_i2c_dev *dev)
 			  dev->pdata->master_id, dev->clk_path_vote.client_hdl);
 		}
 
-		i2c_qup_clk_path_vote(dev);
+		if (dev->pdata->active_only)
+			i2c_qup_clk_path_vote(dev);
 	} else {
 		/* guard to log only one error on multiple failure */
 		if (!dev->clk_path_vote.reg_err) {
@@ -573,7 +575,8 @@ static void i2c_qup_suspend(struct qup_i2c_dev *dev)
 	if (!dev->pdata->clk_ctl_xfer)
 		i2c_qup_pm_suspend_clk(dev);
 
-	i2c_qup_clk_path_unvote(dev);
+	if (!dev->pdata->active_only)
+		i2c_qup_clk_path_unvote(dev);
 
 	i2c_qup_gpio_free(dev);
 }
@@ -586,7 +589,8 @@ static void i2c_qup_resume(struct qup_i2c_dev *dev)
 	i2c_qup_gpio_request(dev);
 
 	i2c_qup_clk_path_postponed_register(dev);
-	i2c_qup_clk_path_vote(dev);
+	if (!dev->pdata->active_only)
+		 i2c_qup_clk_path_vote(dev);
 
 	if (!dev->pdata->clk_ctl_xfer)
 		i2c_qup_pm_resume_clk(dev);
@@ -1334,6 +1338,7 @@ int __devinit msm_i2c_rsrcs_dt_to_pdata_map(struct platform_device *pdev,
 	{"qcom,scl-gpio",      gpios,               DT_OPTIONAL,  DT_GPIO, -1},
 	{"qcom,sda-gpio",      gpios + 1,           DT_OPTIONAL,  DT_GPIO, -1},
 	{"qcom,clk-ctl-xfer", &pdata->clk_ctl_xfer, DT_OPTIONAL,  DT_BOOL, -1},
+	{"qcom,active-only",  &pdata->active_only,  DT_OPTIONAL,  DT_BOOL,  0},
 	{"qcom,noise-rjct-scl", &pdata->noise_rjct_scl, DT_OPTIONAL, DT_U32, 0},
 	{"qcom,noise-rjct-sda", &pdata->noise_rjct_sda, DT_OPTIONAL, DT_U32, 0},
 	{NULL,                                    NULL,           0,      0, 0},
@@ -1736,6 +1741,8 @@ qup_i2c_remove(struct platform_device *pdev)
 	}
 	clk_put(dev->clk);
 
+	if (dev->pdata->active_only)
+		i2c_qup_clk_path_unvote(dev);
 	i2c_qup_clk_path_teardown(dev);
 
 	if (dev->gsbi)
