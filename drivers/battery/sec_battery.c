@@ -1237,7 +1237,7 @@ static void sec_bat_chg_temperature_check(
 static void sec_bat_event_program_alarm(
 	struct sec_battery_info *battery, int seconds)
 {
-	ktime_t next = ktime_set(seconds, 0);
+	ktime_t next = ktime_set(seconds + 10, 0);
 
 	alarm_start_relative(&battery->event_termination_alarm, next);
 }
@@ -1415,11 +1415,9 @@ static bool sec_bat_time_management(
 				struct sec_battery_info *battery)
 {
 	unsigned long charging_time;
-	ktime_t	current_time;
 	struct timespec ts;
 
-	current_time = ktime_get_boottime();
-	ts = ktime_to_timespec(current_time);
+	ktime_get_ts(&ts);
 
 	if (battery->charging_start_time == 0) {
 		dev_dbg(battery->dev,
