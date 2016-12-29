@@ -180,10 +180,6 @@ config LCD_CONNECTION_CHECK
 	bool "check if LCD connected or not and detect panel vendor"
 	default n
 
-config SAMSUNG_DEBUG_DISPLAY 
-	bool "Add Samsung Debugging code"
-	default n
-	
 config FB_MSM_MDSS_TC_DSI2LVDS_WXGA_PANEL
 	bool "TOSHIBA DSI2LVDS CONVERTER"
 	default n

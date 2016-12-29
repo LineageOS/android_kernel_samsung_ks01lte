@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -46,6 +46,9 @@
 #ifndef MIN
 #define  MIN(x, y) (((x) < (y)) ? (x) : (y))
 #endif
+
+#define MDP_PP_AD_BL_LINEAR	0x0
+#define MDP_PP_AD_BL_LINEAR_INV	0x1
 
 /**
  * enum mdp_notify_event - Different frame events to indicate frame update state
@@ -137,9 +140,9 @@ struct msm_mdp_interface {
 	int (*lut_update)(struct msm_fb_data_type *mfd, struct fb_cmap *cmap);
 	int (*do_histogram)(struct msm_fb_data_type *mfd,
 				struct mdp_histogram *hist);
-	int (*update_ad_input)(struct msm_fb_data_type *mfd);
-	int (*ad_attenuate_bl)(u32 bl, u32 *bl_out,
-			struct msm_fb_data_type *mfd);
+	int (*ad_calc_bl)(struct msm_fb_data_type *mfd, int bl_in,
+		int *bl_out, bool *bl_out_notify);
+	int (*ad_shutdown_cleanup)(struct msm_fb_data_type *mfd);
 	int (*panel_register_done)(struct mdss_panel_data *pdata);
 	u32 (*fb_stride)(u32 fb_index, u32 xres, int bpp);
 	int (*splash_init_fnc)(struct msm_fb_data_type *mfd);
@@ -209,6 +212,7 @@ struct msm_fb_data_type {
 	int ext_ad_ctrl;
 	u32 ext_bl_ctrl;
 	u32 calib_mode;
+	u32 ad_bl_level;
 	u32 bl_level;
 	u32 bl_scale;
 	u32 bl_min_lvl;
@@ -250,15 +254,12 @@ struct msm_fb_data_type {
 
 	u32 dcm_state;
 	struct list_head proc_list;
-
+	u32 wait_for_kickoff;
 	struct ion_client *fb_ion_client;
 	struct ion_handle *fb_ion_handle;
 	struct dma_buf *fbmem_buf;
 
-	bool mdss_fb_split_stored;
-
 	int blank_mode;
-	u32 wait_for_kickoff;
 };
 
 static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)
@@ -279,9 +280,15 @@ static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)
 		mutex_unlock(&mfd->no_update.lock);
 	}
 }
+
 #ifdef CONFIG_FB_MSM_CAMERA_CSC
+#if defined(CONFIG_SEC_KS01_PROJECT)|| defined(CONFIG_SEC_ATLANTIC_PROJECT)
 extern u8 prev_csc_update;
+#endif
 extern u8 csc_update;
+#if !defined(CONFIG_SEC_KS01_PROJECT) && !defined(CONFIG_SEC_ATLANTIC_PROJECT)
+extern u8 pre_csc_update;
+#endif
 #endif
 
 static inline bool mdss_fb_is_power_off(struct msm_fb_data_type *mfd)
@@ -313,9 +320,6 @@ void mdss_fb_signal_timeline(struct msm_sync_pt_data *sync_pt_data);
 struct sync_fence *mdss_fb_sync_get_fence(struct sw_sync_timeline *timeline,
 				const char *fence_name, int val);
 int mdss_fb_register_mdp_instance(struct msm_mdp_interface *mdp);
-#if defined(CONFIG_MDNIE_TFT_MSM8X26)
-void mdss_negative_color(int is_negative_on);
-#endif
 int mdss_fb_dcm(struct msm_fb_data_type *mfd, int req_state);
 int mdss_fb_suspres_panel(struct device *dev, void *data);
 #endif /* MDSS_FB_H */

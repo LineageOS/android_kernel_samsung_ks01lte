@@ -883,7 +883,7 @@ static struct dsi_cmd get_gamma_control_set(int candella)
 	struct dsi_cmd gamma_control = {0,};
 	/* Just a safety check to ensure smart dimming data is initialised well */
 	if (msd.sdimconf == NULL)
-		msd.sdimconf = smart_S6E8FA0_get_conf();
+		return gamma_control;
 	BUG_ON(msd.sdimconf->generate_gamma == NULL);
 	msd.sdimconf->generate_gamma(candella, &gamma_cmds_list.cmd_desc[0].payload[1]);
 
@@ -1662,8 +1662,8 @@ void mdss_dsi_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl, struct dsi_cmd_desc *c
 	cmdreq.cmds_cnt = cnt;
 	cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
 
-	if (flag & CMD_REQ_UNICAST)
-		cmdreq.flags |= CMD_REQ_UNICAST;
+	if (flag & CMD_REQ_SINGLE_TX)
+		cmdreq.flags |= CMD_REQ_SINGLE_TX;
 
 	cmdreq.rlen = 0;
 	cmdreq.cb = NULL;
@@ -1674,11 +1674,14 @@ void mdss_dsi_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl, struct dsi_cmd_desc *c
 u32 mdss_dsi_cmd_receive(struct mdss_dsi_ctrl_pdata *ctrl, struct dsi_cmd_desc *cmd, int rlen)
 {
 	struct dcs_cmd_req cmdreq;
+	char *buf;
+
+	buf = kmalloc(sizeof(rlen), GFP_KERNEL);
 	memset(&cmdreq, 0, sizeof(cmdreq));
 	cmdreq.cmds = cmd;
 	cmdreq.cmds_cnt = 1;
 	cmdreq.flags = CMD_REQ_RX | CMD_REQ_COMMIT;
-	cmdreq.rbuf = ctrl->rx_buf.data;
+	cmdreq.rbuf = buf;
 	cmdreq.rlen = rlen;
 	cmdreq.cb = NULL; /* call back */
 
@@ -1686,6 +1689,7 @@ u32 mdss_dsi_cmd_receive(struct mdss_dsi_ctrl_pdata *ctrl, struct dsi_cmd_desc *
 	/*
 	 * blocked here, untill call back called
 	 */
+	kfree(buf);
 	return ctrl->rx_buf.len;
 }
 
@@ -1974,7 +1978,7 @@ static int mipi_samsung_disp_send_cmd(
 
 			/* Single Tx use for DSI_VIDEO_MODE Only */
 			if(msd.pdata->panel_info.mipi.mode == DSI_VIDEO_MODE)
-				flag = CMD_REQ_UNICAST;
+				flag = CMD_REQ_SINGLE_TX;
 			else
 				flag = 0;
 
@@ -1984,8 +1988,8 @@ static int mipi_samsung_disp_send_cmd(
 				cmd_size = make_brightcontrol_hbm_set(msd.dstat.bright_level);
 				msd.dstat.hbm_mode = 1;
 			} else {
-				msd.dstat.hbm_mode = 0;
 				cmd_size = make_brightcontrol_set(msd.dstat.bright_level);
+				msd.dstat.hbm_mode = 0;
 			}
 #else
 			cmd_size = make_brightcontrol_set(msd.dstat.bright_level);
@@ -2364,6 +2368,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 {
 	struct mipi_panel_info *mipi;
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
+	struct mdss_panel_info *pinfo;
 
 #if defined(CONFIG_DUAL_LCD)
 	msd.lcd_panel_cmds = 1;
@@ -2376,6 +2381,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 			panel_data);
 
+	pinfo = &pdata->panel_info;
 	mipi  = &pdata->panel_info.mipi;
 
 #if defined(CONFIG_DUAL_LCD)
@@ -2468,6 +2474,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	msd.dstat.on = 1;
 #endif
 
+	pinfo->blank_state = MDSS_PANEL_BLANK_UNBLANK;
 	return 0;
 }
 
@@ -2475,6 +2482,7 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 {
 	struct mipi_panel_info *mipi;
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
+	struct mdss_panel_info *pinfo;
 
 #if defined(CONFIG_DUAL_LCD)
 	LCD_DEBUG("lcd_sel [%s]\n", msd.dstat.lcd_sel ? "CLOSE" : "OPEN");
@@ -2491,6 +2499,7 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 				panel_data);
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
 
+	pinfo = &pdata->panel_info;
 	mipi  = &pdata->panel_info.mipi;
 
 	msd.dstat.on = 0;
@@ -2504,6 +2513,7 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	msd.lcd_panel_cmds = 0;
 #endif
 
+	pinfo->blank_state = MDSS_PANEL_BLANK_BLANK;
 	return 0;
 }
 
@@ -3716,7 +3726,6 @@ int mdss_dsi_panel_init(struct device_node *node, struct mdss_dsi_ctrl_pdata *ct
 #if defined(CONFIG_BACKLIGHT_CLASS_DEVICE)
 	struct backlight_device *bd = NULL;
 #endif
-	struct mdss_panel_info *pinfo = &(ctrl_pdata->panel_data.panel_info);
 	pr_debug("%s:%d", __func__, __LINE__);
 
 	if (!node)
@@ -3728,7 +3737,6 @@ int mdss_dsi_panel_init(struct device_node *node, struct mdss_dsi_ctrl_pdata *ct
 						__func__, __LINE__);
 	} else {
 		pr_info("%s: Panel Name = %s\n", __func__, panel_name);
-		strlcpy(&pinfo->panel_name[0], panel_name, MDSS_MAX_PANEL_LEN);
 	}
 
 	if(is_panel_supported(panel_name)) {
