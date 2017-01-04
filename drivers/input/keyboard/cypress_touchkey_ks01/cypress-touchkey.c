@@ -33,6 +33,7 @@
 #include <linux/i2c/cypress_touchkey.h>
 #include "cypress_tkey_fw.h"
 #include <linux/regulator/consumer.h>
+#include <linux/fb.h>
 #include <asm/mach-types.h>
 #include <linux/device.h>
 /* #include <mach/msm8974-gpio.h> */
@@ -81,7 +82,7 @@
 #define CYPRESS_65_IC_MASK	0x04
 */
 
-#define USE_OPEN_CLOSE
+#undef USE_OPEN_CLOSE
 #undef DO_NOT_USE_FUNC_PARAM
 
 static int vol_mv_level = 33;
@@ -103,6 +104,9 @@ static int vol_mv_level = 33;
 */
 #define NUM_OF_RETRY_UPDATE	3
 /*#define NUM_OF_KEY		4*/
+
+static struct cypress_touchkey_info *cytk_info = 0;
+static struct mutex suspended_mutex;
 
 #ifdef USE_OPEN_CLOSE
 static int cypress_input_open(struct input_dev *dev);
@@ -224,6 +228,121 @@ static void cypress_init_dvfs(struct cypress_touchkey_info *info)
 	info->dvfs_lock_status = false;
 }
 #endif
+
+void cypress_power_onoff(struct cypress_touchkey_info *info, int onoff);
+static void cypress_touchkey_con_hw(struct cypress_touchkey_info *dev_info,
+					bool flag);
+static void cypress_touchkey_interrupt_set_dual(struct i2c_client *client);
+static int cypress_touchkey_auto_cal(struct cypress_touchkey_info *info);
+
+static void cypress_touchkey_init_work(struct work_struct *work)
+{
+	struct cypress_touchkey_info *info =
+			container_of(work, struct cypress_touchkey_info, init_work);
+
+	cypress_power_onoff(info, 1);
+	cypress_touchkey_con_hw(info, true);
+	msleep(100);
+	info->enabled = true;
+
+#ifdef CYPRESS_MENU_BACK_MULTI_REPORT
+	/* CYPRESS Firmware setting interrupt type : dual or single interrupt */
+	cypress_touchkey_interrupt_set_dual(info->client);
+#endif
+
+	mutex_lock(&info->touchkey_mutex);
+
+#ifdef CONFIG_LEDS_CLASS
+	if (touchled_cmd_reserved) {
+		touchled_cmd_reserved = 0;
+		i2c_smbus_write_byte_data(info->client,
+				CYPRESS_GEN, touchkey_led_status);
+		dev_info(&info->client->dev,
+				"%s: LED returned on\n", __func__);
+		msleep(30);
+	}
+#endif
+
+	mutex_unlock(&info->touchkey_mutex);
+
+	cypress_touchkey_auto_cal(info);
+
+	if (info->is_powering_on)
+		enable_irq(info->irq);
+
+	info->is_powering_on = false;
+
+	mutex_lock(&suspended_mutex);
+	info->suspended = false;
+	mutex_unlock(&suspended_mutex);
+}
+
+#ifdef CONFIG_FB
+static int cypress_touchkey_suspend(struct device *dev);
+static int cypress_touchkey_resume(struct device *dev);
+
+static int fb_notifier_callback(struct notifier_block *p,
+		unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	int new_status;
+	int ev;
+
+	mutex_lock(&cytk_info->ops_lock);
+
+	switch (event) {
+		case FB_EVENT_BLANK :
+			ev = (*(int *)evdata->data);
+			/*
+			 * Normal Screen Wakeup
+			 *
+			 * <6>[   43.486172] [ctk] Event: 4 -> 0
+			 * <6>[   50.488192] [ctk] Event: 0 -> 4
+			 *
+			 * Doze Wakeup
+			 *
+			 * <6>[   81.869758] [ctk] Event: 4 -> 1
+			 * <6>[   86.458247] [ctk] Event: 1 -> 4
+			 *
+			 */
+			switch (ev) {
+				/* Screen On */
+				case FB_BLANK_UNBLANK:
+				case FB_BLANK_NORMAL:
+				case FB_BLANK_VSYNC_SUSPEND:
+				case FB_BLANK_HSYNC_SUSPEND:
+					new_status = 0;
+					break;
+				default:
+					/* Default to screen off to match previous
+					   behaviour */
+					printk(KERN_INFO "[ctk] Unhandled event %i\n", ev);
+					/* Fall through */
+				case FB_BLANK_POWERDOWN:
+					new_status = 1;
+					break;
+			}
+
+			if (new_status == cytk_info->old_status)
+				break;
+
+			if (new_status) {
+				printk(KERN_ERR "[ctk]:suspend tk\n");
+				cypress_touchkey_suspend(&(cytk_info->input_dev->dev));
+			}
+			else {
+				printk(KERN_ERR "[ctk]:resume tk\n");
+				cypress_touchkey_resume(&(cytk_info->input_dev->dev));
+			}
+			cytk_info->old_status = new_status;
+			break;
+	}
+	mutex_unlock(&cytk_info->ops_lock);
+
+	return 0;
+}
+#endif
+
 
 static int cypress_touchkey_i2c_read(struct i2c_client *client,
 		u8 reg, u8 *val, unsigned int len)
@@ -1815,6 +1934,7 @@ static int __devinit cypress_touchkey_probe(struct i2c_client *client,
 	info->pdata = pdata;
 	info->irq = client->irq;
 	info->touchkey_update_status = 0;
+	info->suspended = false;
 /*
 	snprintf(info->phys, sizeof(info->phys),
 			"%s/input0", dev_name(&client->dev));
@@ -1823,6 +1943,8 @@ static int __devinit cypress_touchkey_probe(struct i2c_client *client,
 	input_dev->phys = info->phys;
 	input_dev->id.bustype = BUS_I2C;
 	input_dev->dev.parent = &client->dev;
+
+	cytk_info = info;
 
 	set_bit(EV_SYN, input_dev->evbit);
 	set_bit(EV_KEY, input_dev->evbit);
@@ -1852,6 +1974,17 @@ static int __devinit cypress_touchkey_probe(struct i2c_client *client,
 #ifdef USE_OPEN_CLOSE
 	input_dev->open = cypress_input_open;
 	input_dev->close = cypress_input_close;
+#endif
+
+#ifdef CONFIG_FB   //for tp suspend and resume
+	mutex_init(&info->ops_lock);
+
+	info->fb_notif.notifier_call = fb_notifier_callback;
+
+	ret = fb_register_client(&info->fb_notif);
+
+	if (ret)
+		goto err_reg_input_dev;
 #endif
 
 	info->is_powering_on = true;
@@ -1906,6 +2039,10 @@ static int __devinit cypress_touchkey_probe(struct i2c_client *client,
 		info->early_suspend.resume = cypress_touchkey_late_resume;
 		register_early_suspend(&info->early_suspend);
 #endif /* CONFIG_HAS_EARLYSUSPEND */
+
+	mutex_init(&suspended_mutex);
+	info->init_wq = create_singlethread_workqueue("ctk_init_workqueue");
+	INIT_WORK(&info->init_work, cypress_touchkey_init_work);
 
 #if defined(CONFIG_GLOVE_TOUCH)
 	info->glove_wq = create_singlethread_workqueue("cypress_touchkey");
@@ -2058,6 +2195,9 @@ static int __devinit cypress_touchkey_probe(struct i2c_client *client,
 	return 0;
 
 err_sysfs:
+	cancel_work_sync(&info->init_work);
+	flush_workqueue(info->init_wq);
+	destroy_workqueue(info->init_wq);
 #ifdef CONFIG_LEDS_CLASS
 err_led_class_dev:
 	if (info->led_wq)
@@ -2087,6 +2227,8 @@ static int __devexit cypress_touchkey_remove(struct i2c_client *client)
 	if (info->pdata->vdd_led > 0)
 		gpio_free(info->pdata->vdd_led);
 	mutex_destroy(&info->touchkey_mutex);
+	flush_workqueue(info->init_wq);
+	destroy_workqueue(info->init_wq);
 	led_classdev_unregister(&info->leds);
 	input_unregister_device(info->input_dev);
 	input_free_device(info->input_dev);
@@ -2100,6 +2242,13 @@ static int cypress_touchkey_suspend(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct cypress_touchkey_info *info = i2c_get_clientdata(client);
 	int ret = 0;
+
+	if (info->suspended) {
+		dev_info(dev, "Already in suspend state\n");
+		return 0;
+	}
+
+	cancel_work_sync(&info->init_work);
 
 	info->is_powering_on = true;
 
@@ -2115,6 +2264,10 @@ static int cypress_touchkey_suspend(struct device *dev)
 	dev_info(&info->client->dev,
 			"%s: dvfs_lock free.\n", __func__);
 #endif
+	mutex_lock(&suspended_mutex);
+	info->suspended = true;
+	mutex_unlock(&suspended_mutex);
+
 	return ret;
 }
 
@@ -2122,39 +2275,15 @@ static int cypress_touchkey_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct cypress_touchkey_info *info = i2c_get_clientdata(client);
-	int ret = 0;
-	cypress_power_onoff(info, 1);
-	cypress_touchkey_con_hw(info, true);
-	msleep(100);
-	info->enabled = true;
 
-#ifdef CYPRESS_MENU_BACK_MULTI_REPORT
-	/* CYPRESS Firmware setting interrupt type : dual or single interrupt */
-	cypress_touchkey_interrupt_set_dual(info->client);
-#endif
-
-	mutex_lock(&info->touchkey_mutex);
-
-#ifdef CONFIG_LEDS_CLASS
-	if (touchled_cmd_reserved) {
-		touchled_cmd_reserved = 0;
-		i2c_smbus_write_byte_data(info->client,
-				CYPRESS_GEN, touchkey_led_status);
-		dev_info(&client->dev,
-				"%s: LED returned on\n", __func__);
-		msleep(30);
+	flush_workqueue(info->init_wq);
+	if (!info->suspended) {
+		dev_info(dev, "Already in awake state\n");
+		return 0;
 	}
-#endif
 
-	mutex_unlock(&info->touchkey_mutex);
-
-	cypress_touchkey_auto_cal(info);
-
-	if (info->is_powering_on)
-		enable_irq(info->irq);
-
-	info->is_powering_on = false;
-	return ret;
+	queue_work(info->init_wq, &info->init_work);
+	return 0;
 }
 #endif
 
@@ -2210,10 +2339,12 @@ static void cypress_input_close(struct input_dev *dev)
 #endif
 
 #if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND) && !defined(USE_OPEN_CLOSE)
+#ifndef CONFIG_FB
 static const struct dev_pm_ops cypress_touchkey_pm_ops = {
 	.suspend	= cypress_touchkey_suspend,
 	.resume		= cypress_touchkey_resume,
 };
+#endif
 #endif
 
 struct i2c_driver cypress_touchkey_driver = {
@@ -2224,7 +2355,9 @@ struct i2c_driver cypress_touchkey_driver = {
 		.owner = THIS_MODULE,
 		.of_match_table = cypress_match_table,
 #if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND) && !defined(USE_OPEN_CLOSE)
+#ifndef CONFIG_FB
 		.pm	= &cypress_touchkey_pm_ops,
+#endif
 #endif
 		   },
 	.id_table = cypress_touchkey_id,

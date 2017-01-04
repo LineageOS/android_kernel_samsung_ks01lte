@@ -28,6 +28,7 @@ extern struct class *sec_class;
 #include <linux/input.h>
 #include <linux/earlysuspend.h>
 #include <linux/mutex.h>
+#include <linux/notifier.h>
 
 #define CONFIG_GLOVE_TOUCH
 #if defined(CONFIG_GLOVE_TOUCH)
@@ -139,6 +140,12 @@ struct cypress_touchkey_info {
 #ifdef TK_KEYPAD_ENABLE
 	atomic_t keypad_enable;
 #endif
+	unsigned int old_status;
+	struct workqueue_struct	*init_wq;
+	struct mutex ops_lock;
+	struct notifier_block fb_notif;
+	bool suspended;
+	struct work_struct init_work;
 };
 
 void touchkey_charger_infom(bool en);
