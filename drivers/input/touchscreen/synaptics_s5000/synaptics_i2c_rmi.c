@@ -31,6 +31,7 @@
 #include <linux/i2c/synaptics_rmi.h>
 #include <linux/of_gpio.h>
 #include <linux/regulator/consumer.h>
+#include <linux/fb.h>
 
 #define DRIVER_NAME "synaptics_rmi4_i2c"
 
@@ -143,6 +144,9 @@
 #define NUM_RX	28
 #define NUM_TX	16
 #endif
+
+static struct synaptics_rmi4_data *syna_rmi4_data=0;
+static struct mutex suspended_mutex;
 
 #ifdef TSP_PATTERN_TRACKING_METHOD
 #define MAX_GHOSTCHECK_FINGER 		10
@@ -3974,6 +3978,90 @@ static void alloc_tsp_reboot_mode(void)
 }
 #endif
 
+#ifdef CONFIG_FB
+static int fb_notifier_callback(struct notifier_block *p,
+		unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	int new_status;
+	int ev;
+
+	mutex_lock(&syna_rmi4_data->ops_lock);
+
+	switch (event) {
+		case FB_EVENT_BLANK :
+			ev = (*(int *)evdata->data);
+
+			/*
+			 * Normal Screen Wakeup
+			 *
+			 * <6>[   43.486172] [syna] Event: 4 -> 0
+			 * <6>[   50.488192] [syna] Event: 0 -> 4
+                         *
+			 * Doze Wakeup
+			 *
+			 * <6>[   81.869758] [syna] Event: 4 -> 1
+			 * <6>[   86.458247] [syna] Event: 1 -> 4
+			 *
+			 */
+			switch (ev) {
+				/* Screen On */
+				case FB_BLANK_UNBLANK:
+				case FB_BLANK_NORMAL:
+				case FB_BLANK_VSYNC_SUSPEND:
+				case FB_BLANK_HSYNC_SUSPEND:
+					new_status = 0;
+					break;
+				default:
+					/* Default to screen off to match previous
+					   behaviour */
+					printk(KERN_INFO "[syna] Unhandled event %i\n", ev);
+					/* Fall through */
+				case FB_BLANK_POWERDOWN:
+					new_status = 1;
+					break;
+			}
+
+			if (new_status == syna_rmi4_data->old_status)
+				break;
+
+			if (new_status) {
+				printk(KERN_ERR "[syna]:suspend tp\n");
+				synaptics_rmi4_suspend(&(syna_rmi4_data->input_dev->dev));
+			}
+			else {
+				printk(KERN_ERR "[syna]:resume tp\n");
+				synaptics_rmi4_resume(&(syna_rmi4_data->input_dev->dev));
+			}
+			syna_rmi4_data->old_status = new_status;
+			break;
+	}
+	mutex_unlock(&syna_rmi4_data->ops_lock);
+
+	return 0;
+}
+#endif
+
+static void synaptics_rmi4_init_work(struct work_struct *work)
+{
+	struct synaptics_rmi4_data *rmi4_data =
+			container_of(work, struct synaptics_rmi4_data, init_work);
+	int retval;
+
+	mutex_lock(&syna_rmi4_data->input_dev->mutex);
+
+	retval = synaptics_rmi4_start_device(rmi4_data);
+	if (retval < 0)
+		dev_err(&rmi4_data->i2c_client->dev,
+			"%s: Failed to start device\n", __func__);
+
+	mutex_unlock(&rmi4_data->input_dev->mutex);
+
+	mutex_lock(&suspended_mutex);
+	rmi4_data->suspended = false;
+	mutex_unlock(&suspended_mutex);
+}
+
  /**
  * synaptics_rmi4_probe()
  *
@@ -4057,6 +4145,8 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 	rmi4_data->irq_enabled = false;
 	rmi4_data->tsp_probe = false;
 	rmi4_data->rebootcount = 0;
+	rmi4_data->suspended = false;
+
 	rmi4_data->panel_revision = rmi4_data->board->panel_revision;
 	rmi4_data->i2c_read = synaptics_rmi4_i2c_read;
 	rmi4_data->i2c_write = synaptics_rmi4_i2c_write;
@@ -4114,6 +4204,8 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 	mutex_init(&(rmi4_data->rmi4_reflash_mutex));
 	mutex_init(&(rmi4_data->rmi4_device_mutex));
 
+	syna_rmi4_data = rmi4_data;
+
 #ifdef TSP_INIT_COMPLETE
 	init_completion(&rmi4_data->init_done);
 #endif
@@ -4157,6 +4249,17 @@ err_tsp_reboot:
 		else goto err_set_input_device;
 	}
 
+#ifdef CONFIG_FB   //for tp suspend and resume
+	mutex_init(&rmi4_data->ops_lock);
+
+	rmi4_data->fb_notif.notifier_call = fb_notifier_callback;
+
+	retval = fb_register_client(&rmi4_data->fb_notif);
+
+	if (retval)
+		goto err_set_input_device;
+#endif
+
 	retval = synaptics_rmi4_init_exp_fn(rmi4_data);
 	if (retval < 0) {
 		dev_err(&client->dev,
@@ -4188,6 +4291,10 @@ err_tsp_reboot:
 				__func__);
 		goto err_enable_irq;
 	}
+
+	mutex_init(&suspended_mutex);
+	rmi4_data->init_wq = create_singlethread_workqueue("rmi4_i2c_workqueue");
+	INIT_WORK(&rmi4_data->init_work, synaptics_rmi4_init_work);
 
 	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
 		retval = sysfs_create_file(&rmi4_data->input_dev->dev.kobj,
@@ -4240,6 +4347,9 @@ err_sysfs:
 		sysfs_remove_file(&rmi4_data->input_dev->dev.kobj,
 				&attrs[attr_count].attr);
 	}
+	cancel_work_sync(&rmi4_data->init_work);
+	flush_workqueue(rmi4_data->init_wq);
+	destroy_workqueue(rmi4_data->init_wq);
 	synaptics_rmi4_irq_enable(rmi4_data, false);
 
 err_enable_irq:
@@ -4287,6 +4397,9 @@ static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 		sysfs_remove_file(&rmi4_data->input_dev->dev.kobj,
 				&attrs[attr_count].attr);
 	}
+
+	flush_workqueue(rmi4_data->init_wq);
+	destroy_workqueue(rmi4_data->init_wq);
 
 	input_unregister_device(rmi4_data->input_dev);
 
@@ -4615,18 +4728,29 @@ static int synaptics_rmi4_suspend(struct device *dev)
 
 	dev_dbg(&rmi4_data->i2c_client->dev, "%s\n", __func__);
 
-	if (rmi4_data->staying_awake) {
-		dev_info(&rmi4_data->i2c_client->dev, "%s : return due to staying_awake\n",
-			__func__);
+	if (rmi4_data->suspended) {
+		dev_info(dev, "Already in suspend state\n");
 		return 0;
 	}
 
+	if (rmi4_data->staying_awake) {
+		dev_info(&rmi4_data->i2c_client->dev, "%s : return due to staying_awake\n",
+			__func__);
+		goto out;
+	}
+
+	cancel_work_sync(&rmi4_data->init_work);
+
 	mutex_lock(&rmi4_data->input_dev->mutex);
 
-	if (rmi4_data->input_dev->users)
-		synaptics_rmi4_stop_device(rmi4_data);
+	synaptics_rmi4_stop_device(rmi4_data);
 
 	mutex_unlock(&rmi4_data->input_dev->mutex);
+
+out:
+	mutex_lock(&suspended_mutex);
+	rmi4_data->suspended = true;
+	mutex_unlock(&suspended_mutex);
 
 	return 0;
 }
@@ -4643,30 +4767,32 @@ static int synaptics_rmi4_suspend(struct device *dev)
  */
 static int synaptics_rmi4_resume(struct device *dev)
 {
-	int retval;
 	struct synaptics_rmi4_data *rmi4_data = dev_get_drvdata(dev);
 
 	dev_dbg(&rmi4_data->i2c_client->dev, "%s\n", __func__);
 
-	mutex_lock(&rmi4_data->input_dev->mutex);
-
-	if (rmi4_data->input_dev->users) {
-		retval = synaptics_rmi4_start_device(rmi4_data);
-		if (retval < 0)
-				dev_err(&rmi4_data->i2c_client->dev,
-					"%s: Failed to start device\n", __func__);
+	if (rmi4_data->staying_awake) {
+		return 0;
 	}
 
-	mutex_unlock(&rmi4_data->input_dev->mutex);
+	flush_workqueue(rmi4_data->init_wq);
+	if (!rmi4_data->suspended) {
+		dev_info(dev, "Already in awake state\n");
+		return 0;
+	}
+
+	queue_work(rmi4_data->init_wq, &rmi4_data->init_work);
 
 	return 0;
 }
 #endif
 
+#ifndef CONFIG_FB
 static const struct dev_pm_ops synaptics_rmi4_dev_pm_ops = {
 	.suspend = synaptics_rmi4_suspend,
 	.resume  = synaptics_rmi4_resume,
 };
+#endif
 #endif
 
 static const struct i2c_device_id synaptics_rmi4_id_table[] = {
@@ -4691,7 +4817,9 @@ static struct i2c_driver synaptics_rmi4_driver = {
 		.owner = THIS_MODULE,
 		.of_match_table = synaptics_match_table,
 #ifdef CONFIG_PM
+#ifndef CONFIG_FB
 		.pm = &synaptics_rmi4_dev_pm_ops,
+#endif
 #endif
 	},
 	.probe = synaptics_rmi4_probe,

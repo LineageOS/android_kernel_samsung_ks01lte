@@ -61,7 +61,7 @@
  */
 #define SURFACE_TOUCH
 
-#define	USE_OPEN_CLOSE
+#undef	USE_OPEN_CLOSE
 #ifdef USE_OPEN_CLOSE
 /*#define USE_OPEN_DWORK*/
 #endif
@@ -412,6 +412,12 @@ struct synaptics_rmi4_data {
 	int (*reset_device)(struct synaptics_rmi4_data *rmi4_data);
 	int (*stop_device)(struct synaptics_rmi4_data *rmi4_data);
 	int (*start_device)(struct synaptics_rmi4_data *rmi4_data);
+	unsigned int old_status;
+	struct mutex ops_lock;
+	struct notifier_block fb_notif;
+	bool suspended;
+	struct workqueue_struct *init_wq;
+	struct work_struct init_work;
 };
 
 enum exp_fn {
