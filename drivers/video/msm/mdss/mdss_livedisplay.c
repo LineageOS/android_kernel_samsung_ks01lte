@@ -81,7 +81,6 @@ static int mdss_livedisplay_update_pcc(struct mdss_livedisplay_ctx *mlc)
  */
 static void mdss_livedisplay_worker(struct work_struct *work)
 {
-	int ret = 0;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
 	struct mdss_livedisplay_ctx *mlc = NULL;
@@ -183,7 +182,6 @@ static DEVICE_ATTR(rgb, S_IRUGO | S_IWUSR | S_IWGRP, mdss_livedisplay_get_rgb, m
 
 int mdss_livedisplay_parse_dt(struct device_node *np, struct mdss_panel_info *pinfo)
 {
-	int rc = 0, i = 0;
 	struct mdss_livedisplay_ctx *mlc;
 
 	if (pinfo == NULL)
