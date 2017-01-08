@@ -858,6 +858,9 @@ static int smd_tty_core_init(void)
 			legacy_ds |= cpu_is_msm8x60() &&
 					(socinfo_get_platform_subtype() == 0x0);
 
+			/* Samsung request for all project */
+			legacy_ds = 1;
+
 			if (!legacy_ds)
 				continue;
 		}
