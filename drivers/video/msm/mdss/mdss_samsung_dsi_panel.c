@@ -244,8 +244,6 @@ static int mipi_samsung_disp_send_cmd(
 		enum mipi_samsung_cmd_list cmd,
 		unsigned char lock);
 
-static struct delayed_work touchsensing_work;
-
 int set_panel_rev(unsigned int id)
 {
 	switch (id & 0xFF) {
@@ -2108,22 +2106,17 @@ unknown_command:
 
 void mdss_dsi_panel_touchsensing(int enable)
 {
-	if (enable)
-		schedule_delayed_work(&touchsensing_work,
-			msecs_to_jiffies(50));
-}
+	if (enable) {
+		if(!msd.dstat.on)
+		{
+			pr_err("%s: No panel on!\n", __func__);
+			return;
+		}
 
-static void mdss_dsi_panel_touchsensing_work(struct work_struct *work)
-{
-	if(!msd.dstat.on)
-	{
-		pr_err("%s: No panel on!\n", __func__);
-		return;
+		pr_info("%s: Sending touchsensing on cmds\n", __func__);
+
+		mipi_samsung_disp_send_cmd(PANEL_TOUCHSENSING_ON, true);
 	}
-
-	pr_err("%s: Sending touchsensing on cmds\n", __func__);
-
-	mipi_samsung_disp_send_cmd(PANEL_TOUCHSENSING_ON, true);
 }
 
 static int mdss_dsi_panel_registered(struct mdss_panel_data *pdata)
@@ -3865,7 +3858,6 @@ int mdss_dsi_panel_init(struct device_node *node, struct mdss_dsi_ctrl_pdata *ct
 	 *  will be powered on later on.
 	 */
 	msd.dstat.on = 0;
-	INIT_DELAYED_WORK(&touchsensing_work, mdss_dsi_panel_touchsensing_work);
 	return 0;
 }
 
