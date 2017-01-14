@@ -36,6 +36,7 @@
 		qcom,mdss-pan-dsi-dst-format = <3>;
 		qcom,mdss-pan-dsi-vc = <0>;
 		qcom,mdss-pan-dsi-rgb-swap = <0>;
+		qcom,mdss-dsi-lp11-init = <1>;
 		qcom,mdss-force-clk-lane-hs = <1>;
 		samsung,mdss-early-lcd-on = <1>;
 		qcom,mdss-pan-dsi-data-lanes = <1 1 1 1>;

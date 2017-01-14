@@ -3207,8 +3207,14 @@ static int mdss_panel_parse_dt(struct device_node *np,
 
 	pinfo->mipi.dsi_phy_db = phy_params;
 
-		fbc_enabled = of_property_read_bool(np,
-			"qcom,fbc-enabled");
+	pinfo->mipi.lp11_init = of_property_read_bool(np,
+					"qcom,mdss-dsi-lp11-init");
+	rc = of_property_read_u32(np, "qcom,mdss-dsi-init-delay-us", &tmp);
+	pinfo->mipi.init_delay = (!rc ? tmp : 0);
+
+	fbc_enabled = of_property_read_bool(np,
+				"qcom,fbc-enabled");
+
 	if (fbc_enabled) {
 		pr_debug("%s:%d FBC panel enabled.\n", __func__, __LINE__);
 		pinfo->fbc.enabled = 1;
