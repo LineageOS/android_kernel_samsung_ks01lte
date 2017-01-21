@@ -1417,7 +1417,7 @@ static bool sec_bat_time_management(
 	unsigned long charging_time;
 	struct timespec ts;
 
-	ktime_get_ts(&ts);
+	ts = ktime_to_timespec(ktime_get_boottime());
 
 	if (battery->charging_start_time == 0) {
 		dev_dbg(battery->dev,
